@@ -84,8 +84,10 @@ int main(int argc, char* argv[]) {
     // Command line: media files are imported; --source <file> also opens it in
     // the preview (--autoplay starts playback); --diagnostics[=tab] opens Diagnostics.
     // --timeline also appends the imported files to the sequence, in order.
+    // A .lfproj argument opens that project.
     QStringList filesToImport;
     QString sourceFile;
+    QString projectFile;
     const QStringList args = app.arguments();
     const bool autoplay = args.contains(QStringLiteral("--autoplay"));
     const bool toTimeline = args.contains(QStringLiteral("--timeline"));
@@ -93,8 +95,12 @@ int main(int argc, char* argv[]) {
         const QString& arg = args[i];
         if (arg.startsWith(QStringLiteral("--diagnostics"))) window.openDiagnostics(arg.section(QLatin1Char('='), 1));
         else if (arg == QStringLiteral("--source") && i + 1 < args.size()) sourceFile = args[++i];
-        else if (!arg.startsWith(QStringLiteral("--")) && QFileInfo::exists(arg)) filesToImport << arg;
+        else if (!arg.startsWith(QStringLiteral("--")) && QFileInfo::exists(arg)) {
+            if (arg.endsWith(QStringLiteral(".lfproj"), Qt::CaseInsensitive)) projectFile = arg;
+            else filesToImport << arg;
+        }
     }
+    if (!projectFile.isEmpty()) window.openProjectFile(projectFile);
     if (!filesToImport.isEmpty()) window.importFiles(filesToImport, toTimeline);
     if (!sourceFile.isEmpty()) window.openSourceFile(sourceFile, autoplay);
 

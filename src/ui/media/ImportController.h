@@ -19,6 +19,8 @@ public:
     // Native file dialog, then importFiles().
     void importWithDialog(QWidget* parent);
     void importFiles(const QStringList& paths, QWidget* parent = nullptr);
+    // Probes `path` off the UI thread and points the media item at it (undoable).
+    void relink(project::MediaId id, const QString& path, QWidget* parent = nullptr);
 
     // Filter string for QFileDialog built from MediaProbe's extension lists.
     static QString fileDialogFilter();

@@ -125,6 +125,34 @@ void ImportController::importFiles(const QStringList& pathsIn, QWidget* parent) 
     }
 }
 
+void ImportController::relink(project::MediaId id, const QString& pathIn, QWidget* parent) {
+    const QString path = QDir::toNativeSeparators(QFileInfo(pathIn).absoluteFilePath());
+    QPointer<ImportController> self(this);
+    QPointer<QWidget> parentPtr(parent);
+    QThreadPool::globalInstance()->start([self, parentPtr, id, path] {
+        auto probed = media::MediaProbe::probe(path.toStdString());
+        if (!self) return;
+        QMetaObject::invokeMethod(self.data(), [self, parentPtr, id, path, probed = std::move(probed)]() mutable {
+            if (!self) return;
+            const project::MediaItem* current = self->m_doc.project().findMedia(id);
+            if (!current) return;
+            if (!probed) {
+                QMessageBox::warning(parentPtr, tr("Relink Media"), tr("%1\n\n%2").arg(QString::fromStdString(probed.error().message), path));
+                return;
+            }
+            project::MediaItem item = *current;
+            item.path = path.toStdString();
+            item.info = std::move(probed.value());
+            item.fingerprintSize = item.info.fileSize;
+            item.fingerprintMtime = item.info.modifiedTimeUnix;
+            item.offline = false;
+            if (item.displayName.empty() || item.displayName == QFileInfo(QString::fromStdString(current->path)).fileName().toStdString()) item.displayName = item.info.fileName;
+            self->m_doc.push(std::make_unique<project::RelinkMediaCommand>(self->m_doc, id, std::move(item)));
+            LF_LOG_INFO(kLog, "relinked media {} -> {}", project::raw(id), path.toStdString());
+        }, Qt::QueuedConnection);
+    });
+}
+
 void ImportController::finish(std::vector<Outcome> outcomes, QWidget* parent) {
     --m_inFlight;
     std::vector<project::MediaItem> items;

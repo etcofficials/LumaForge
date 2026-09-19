@@ -21,6 +21,7 @@ struct MediaItem {
     bool offline = false;        // file missing at load time
 
     [[nodiscard]] media::MediaType type() const noexcept { return info.type; }
+    friend bool operator==(const MediaItem&, const MediaItem&) = default;
 };
 
 }  // namespace lf::project

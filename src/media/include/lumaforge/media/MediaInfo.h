@@ -36,6 +36,7 @@ struct VideoStreamInfo {
     int rotationDegrees = 0;    // from display matrix side data
     bool isFullRange = false;
     std::int64_t frameCount = 0;  // 0 when unknown
+    friend bool operator==(const VideoStreamInfo&, const VideoStreamInfo&) = default;
 };
 
 struct AudioStreamInfo {
@@ -48,6 +49,7 @@ struct AudioStreamInfo {
     std::string sampleFormat;   // "fltp"
     std::int64_t bitRate = 0;
     Rational timeBase;
+    friend bool operator==(const AudioStreamInfo&, const AudioStreamInfo&) = default;
 };
 
 struct MediaInfo {
@@ -65,6 +67,7 @@ struct MediaInfo {
 
     [[nodiscard]] bool hasVideo() const noexcept { return video.has_value(); }
     [[nodiscard]] bool hasAudio() const noexcept { return audio.has_value(); }
+    friend bool operator==(const MediaInfo&, const MediaInfo&) = default;
 };
 
 }  // namespace lf::media

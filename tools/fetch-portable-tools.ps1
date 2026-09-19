@@ -77,4 +77,14 @@ Expand-Flat $zip $FFmpegDest
 @{ asset = $asset.name; url = $asset.browser_download_url; size = $asset.size; fetched = (Get-Date -Format s); license = $FFmpegLicense } |
     ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $FFmpegDest 'PROVENANCE.json')
 Get-ChildItem (Join-Path $FFmpegDest 'lib') -Filter *.lib | ForEach-Object { "  lib: " + $_.Name }
+
+# ---------------------------------------------------------------- nlohmann/json (single header, MIT)
+Write-Host '== nlohmann/json'
+$jsonDest = Join-Path (Split-Path $FFmpegDest) 'nlohmann'
+New-Item -ItemType Directory -Force -Path $jsonDest | Out-Null
+$rel = Get-GitHubRelease 'nlohmann/json' 'v3.11.3'
+$asset = $rel.assets | Where-Object { $_.name -eq 'json.hpp' } | Select-Object -First 1
+$hpp = Get-Cached $asset.browser_download_url ('json-' + $rel.tag_name + '.hpp')
+Copy-Item $hpp (Join-Path $jsonDest 'json.hpp') -Force
+Write-Host ("  " + $rel.tag_name + " -> " + $jsonDest)
 Write-Host '== Done'

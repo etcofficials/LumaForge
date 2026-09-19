@@ -18,6 +18,8 @@
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLineEdit>
@@ -249,7 +251,11 @@ void MediaPanel::showContextMenu(const QPoint& globalPos) {
         }
         menu.addSeparator();
         if (ids.size() == 1) {
+            const auto* item = m_model->item(ids.first());
+            auto* relink = menu.addAction(item && item->offline ? tr("Relink Missing File…") : tr("Relink to Another File…"));
+            connect(relink, &QAction::triggered, this, [this, id = ids.first()] { relinkMedia(id); });
             auto* reveal = menu.addAction(tr("Reveal in Explorer"));
+            reveal->setEnabled(item && !item->offline);
             connect(reveal, &QAction::triggered, this, [this, id = ids.first()] { revealInExplorer(id); });
             auto* props = menu.addAction(tr("Properties…"));
             connect(props, &QAction::triggered, this, [this, id = ids.first()] { showProperties(id); });
@@ -268,6 +274,16 @@ void MediaPanel::removeSelected() {
     if (ids.isEmpty()) return;
     std::vector<project::MediaId> v(ids.begin(), ids.end());
     m_doc.push(std::make_unique<project::RemoveMediaCommand>(m_doc, std::move(v)));
+}
+
+void MediaPanel::relinkMedia(project::MediaId id) {
+    const auto* item = m_model->item(id);
+    if (!item) return;
+    const QString start = QFileInfo(QString::fromStdString(item->path)).absolutePath();
+    const QString file = QFileDialog::getOpenFileName(this, tr("Relink \"%1\"").arg(QString::fromStdString(item->displayName)),
+                                                      QDir(start).exists() ? start : QDir::homePath(), ImportController::fileDialogFilter());
+    if (file.isEmpty()) return;
+    m_importer.relink(id, file, this);
 }
 
 void MediaPanel::revealInExplorer(project::MediaId id) {

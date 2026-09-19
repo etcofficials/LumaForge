@@ -34,6 +34,34 @@ private:
     std::vector<std::pair<std::size_t, MediaItem>> m_removed;   // original index + item
 };
 
+// Points a (usually offline) media item at a different file, with its fresh probe.
+class RelinkMediaCommand final : public cmd::Command {
+public:
+    RelinkMediaCommand(Document& doc, MediaId id, MediaItem relinked);
+    [[nodiscard]] std::string text() const override { return "Relink Media"; }
+    void redo() override;
+    void undo() override;
+
+private:
+    Document& m_doc;
+    MediaId m_id;
+    MediaItem m_new;
+    MediaItem m_old;
+};
+
+class ProjectSettingsCommand final : public cmd::Command {
+public:
+    ProjectSettingsCommand(Document& doc, ProjectSettings settings);
+    [[nodiscard]] std::string text() const override { return "Project Settings"; }
+    void redo() override;
+    void undo() override;
+
+private:
+    Document& m_doc;
+    ProjectSettings m_new;
+    ProjectSettings m_old;
+};
+
 class RenameMediaCommand final : public cmd::Command {
 public:
     RenameMediaCommand(Document& doc, MediaId id, std::string newName);

@@ -13,6 +13,7 @@
 #include <optional>
 
 class QLabel;
+class QMenu;
 class QSplitter;
 
 namespace lf::hw { class GpuDevice; }
@@ -26,6 +27,7 @@ class InspectorPanel;
 class MediaPanel;
 class PlaybackController;
 class PreviewPanel;
+class ProjectController;
 class TimelinePanel;
 
 class MainWindow : public QMainWindow {
@@ -42,6 +44,8 @@ public:
     void importFiles(const QStringList& paths, bool addToTimeline = false);
     // Imports one file and opens it in the source preview (optionally playing).
     void openSourceFile(const QString& path, bool autoplay);
+    // Opens a .lfproj (asks about unsaved changes first).
+    void openProjectFile(const QString& path);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -59,6 +63,8 @@ private:
     void showDiagnostics(const QString& tab = {});
     void notYetAvailable(const QString& feature);
     void onDocumentChange(const project::Change& change);
+    void rebuildRecentMenu();
+    void showProjectSettings();
     void scheduleSequenceRefresh();
     void refreshSequenceProgram();
     // Switches the preview to the timeline (no-op when already there).
@@ -73,6 +79,8 @@ private:
     int m_documentListener = 0;
     ImportController* m_importer = nullptr;
     PlaybackController* m_playback = nullptr;
+    ProjectController* m_project = nullptr;
+    QMenu* m_recentMenu = nullptr;
     std::shared_ptr<const playback::Program> m_sequenceProgram;
     bool m_sequenceRefreshPending = false;
 

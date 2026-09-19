@@ -85,4 +85,40 @@ void RenameMediaCommand::undo() {
     }
 }
 
+// ---------------------------------------------------------------- Relink
+
+RelinkMediaCommand::RelinkMediaCommand(Document& doc, MediaId id, MediaItem relinked) : m_doc(doc), m_id(id), m_new(std::move(relinked)) {
+    m_new.id = id;   // identity never changes: clips keep pointing at it
+}
+
+void RelinkMediaCommand::redo() {
+    if (auto* m = m_doc.project().findMedia(m_id)) {
+        m_old = *m;
+        *m = m_new;
+        m_doc.notify(Change{Change::Kind::MediaChanged, {m_id}, {}});
+    }
+}
+
+void RelinkMediaCommand::undo() {
+    if (auto* m = m_doc.project().findMedia(m_id)) {
+        *m = m_old;
+        m_doc.notify(Change{Change::Kind::MediaChanged, {m_id}, {}});
+    }
+}
+
+// ---------------------------------------------------------------- Settings
+
+ProjectSettingsCommand::ProjectSettingsCommand(Document& doc, ProjectSettings settings) : m_doc(doc), m_new(std::move(settings)) {}
+
+void ProjectSettingsCommand::redo() {
+    m_old = m_doc.project().settings;
+    m_doc.project().settings = m_new;
+    m_doc.notify(Change{Change::Kind::Settings, {}, {}});
+}
+
+void ProjectSettingsCommand::undo() {
+    m_doc.project().settings = m_old;
+    m_doc.notify(Change{Change::Kind::Settings, {}, {}});
+}
+
 }  // namespace lf::project

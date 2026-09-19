@@ -47,6 +47,7 @@ private:
     void updateEmptyState();
     void showContextMenu(const QPoint& globalPos);
     void removeSelected();
+    void relinkMedia(project::MediaId id);
     void revealInExplorer(project::MediaId id);
     void showProperties(project::MediaId id);
     void selectMedia(const QList<project::MediaId>& ids);

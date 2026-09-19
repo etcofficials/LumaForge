@@ -19,6 +19,7 @@ struct Track {
     bool muted = false;        // audio: silent; video: hidden
     bool locked = false;       // no edits
     bool solo = false;
+    friend bool operator==(const Track&, const Track&) = default;
 };
 
 enum class ClipKind { Video, Audio, Image, Text };

@@ -53,7 +53,7 @@ QVariant MediaModel::data(const QModelIndex& index, int role) const {
         case ThumbnailRole: {
             auto it = m_thumbnails.find(m.id);
             if (it != m_thumbnails.end()) return *it;
-            if (m.info.hasVideo() && !m_thumbnailRequested.value(m.id, false)) {
+            if (m.info.hasVideo() && !m.offline && !m_thumbnailRequested.value(m.id, false)) {
                 // const-cast is confined to lazy request bookkeeping.
                 auto* self = const_cast<MediaModel*>(this);
                 self->m_thumbnailRequested.insert(m.id, true);
@@ -181,6 +181,9 @@ void MediaModel::onDocumentChange(const project::Change& change) {
             break;
         case K::MediaChanged:
             for (auto id : change.mediaIds) {
+                // A relink changes the file: the thumbnail must be produced again.
+                m_thumbnails.remove(id);
+                m_thumbnailRequested.remove(id);
                 const QModelIndex idx = indexOf(id);
                 if (idx.isValid()) emit dataChanged(idx, index(idx.row(), ColumnCount - 1));
             }

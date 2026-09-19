@@ -8,8 +8,11 @@
 #include "ui/ActionRegistry.h"
 #include "ui/Icons.h"
 #include "ui/Theme.h"
+#include "lumaforge/project/MediaCommands.h"
 #include "ui/dialogs/DiagnosticsDialog.h"
+#include "ui/dialogs/ProjectSettingsDialog.h"
 #include "ui/media/ImportController.h"
+#include "ui/project/ProjectController.h"
 #include "ui/panels/InspectorPanel.h"
 #include "ui/panels/MediaPanel.h"
 #include "ui/playback/PlaybackController.h"
@@ -25,6 +28,7 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QLabel>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
@@ -46,7 +50,7 @@ constexpr const char* kLog = "ui";
 MainWindow::MainWindow(std::shared_ptr<hw::GpuDevice> gpu, std::shared_ptr<log::RingBufferSink> logSink, QWidget* parent)
     : QMainWindow(parent), m_gpu(std::move(gpu)), m_logSink(std::move(logSink)), m_actions(new ActionRegistry(this)),
       m_document(std::make_unique<project::Document>()), m_importer(new ImportController(*m_document, this)),
-      m_playback(new PlaybackController(m_gpu, true, this)) {
+      m_playback(new PlaybackController(m_gpu, true, this)), m_project(new ProjectController(*m_document, this)) {
     setAcceptDrops(true);
     setWindowIcon(QIcon(QStringLiteral(":/icons/app.svg")));
     setMinimumSize(1024, 640);
@@ -110,6 +114,7 @@ void MainWindow::buildMenus() {
     auto* file = menuBar()->addMenu(tr("&File"));
     file->addAction(m_actions->action(ActionId::ProjectNew));
     file->addAction(m_actions->action(ActionId::ProjectOpen));
+    m_recentMenu = file->addMenu(tr("Open &Recent"));
     file->addSeparator();
     file->addAction(m_actions->action(ActionId::ProjectSave));
     file->addAction(m_actions->action(ActionId::ProjectSaveAs));
@@ -231,13 +236,26 @@ void MainWindow::buildStatusBar() {
 }
 
 void MainWindow::connectActions() {
-    m_actions->connect(ActionId::ProjectNew, this, [this] { notYetAvailable(tr("New Project")); });
-    m_actions->connect(ActionId::ProjectOpen, this, [this] { notYetAvailable(tr("Open Project")); });
-    m_actions->connect(ActionId::ProjectSave, this, [this] { notYetAvailable(tr("Save")); });
-    m_actions->connect(ActionId::ProjectSaveAs, this, [this] { notYetAvailable(tr("Save As")); });
-    m_actions->connect(ActionId::ProjectSettings, this, [this] { notYetAvailable(tr("Project Settings")); });
+    m_actions->connect(ActionId::ProjectNew, this, [this] { m_playback->pause(); m_project->newProject(this); });
+    m_actions->connect(ActionId::ProjectOpen, this, [this] { m_playback->pause(); m_project->open(this); });
+    m_actions->connect(ActionId::ProjectSave, this, [this] { m_project->save(this); });
+    m_actions->connect(ActionId::ProjectSaveAs, this, [this] { m_project->saveAs(this); });
+    m_actions->connect(ActionId::ProjectSettings, this, [this] { showProjectSettings(); });
     m_actions->connect(ActionId::Export, this, [this] { notYetAvailable(tr("Export")); });
     m_actions->connect(ActionId::AppQuit, this, [this] { close(); });
+    connect(m_project, &ProjectController::statusMessage, this, [this](const QString& m) { statusBar()->showMessage(m, 4000); });
+    connect(m_project, &ProjectController::recentFilesChanged, this, &MainWindow::rebuildRecentMenu);
+    connect(m_project, &ProjectController::projectLoaded, this, [this](const QString&) {
+        // A fresh document: nothing selected, playhead at zero, preview on the timeline.
+        m_timelinePanel->view()->clearSelection();
+        m_timelinePanel->view()->setPlayhead(TimePoint::zero());
+        m_timelinePanel->view()->zoomToFit();
+        m_playback->clearProgram();
+        refreshSequenceProgram();
+        updateWindowTitle();
+    });
+    connect(m_project, &ProjectController::projectSaved, this, [this](const QString&) { updateWindowTitle(); });
+    rebuildRecentMenu();
 
     // Media
     m_actions->connect(ActionId::MediaImport, this, [this] { m_importer->importWithDialog(this); });
@@ -360,8 +378,46 @@ void MainWindow::showSequenceInPreview(TimePoint at) {
 }
 
 void MainWindow::updateWindowTitle() {
-    const QString name = QString::fromStdString(m_document->project().settings.name);
-    setWindowTitle(QStringLiteral("%1%2 — LumaForge").arg(name.isEmpty() ? tr("Untitled") : name, m_document->isDirty() ? QStringLiteral("*") : QString()));
+    const QString name = m_project->displayName();
+    QString title = QStringLiteral("%1%2 — LumaForge").arg(name, m_document->isDirty() ? QStringLiteral("*") : QString());
+    setWindowTitle(title);
+    setWindowFilePath(QString::fromStdString(m_document->filePath()));
+    setWindowModified(m_document->isDirty());
+    setWindowTitle(title);   // setWindowFilePath resets the title; ours wins
+}
+
+void MainWindow::rebuildRecentMenu() {
+    m_recentMenu->clear();
+    const QStringList recent = m_project->recentFiles();
+    for (int i = 0; i < recent.size(); ++i) {
+        const QString& path = recent[i];
+        auto* a = m_recentMenu->addAction(QStringLiteral("&%1  %2").arg(i + 1).arg(QFileInfo(path).fileName()));
+        a->setToolTip(path);
+        a->setStatusTip(path);
+        connect(a, &QAction::triggered, this, [this, path] {
+            m_playback->pause();
+            if (m_project->maybeSave(this)) m_project->openFile(path, this);
+        });
+    }
+    if (!recent.isEmpty()) {
+        m_recentMenu->addSeparator();
+        auto* clear = m_recentMenu->addAction(tr("&Clear List"));
+        connect(clear, &QAction::triggered, m_project, &ProjectController::clearRecentFiles);
+    }
+    m_recentMenu->setEnabled(!recent.isEmpty());
+}
+
+void MainWindow::showProjectSettings() {
+    ProjectSettingsDialog dialog(m_document->project().settings, this);
+    if (dialog.exec() != QDialog::Accepted) return;
+    const auto next = dialog.settings();
+    if (next == m_document->project().settings) return;
+    m_document->push(std::make_unique<project::ProjectSettingsCommand>(*m_document, next));
+}
+
+void MainWindow::openProjectFile(const QString& path) {
+    m_playback->pause();
+    if (m_project->maybeSave(this)) m_project->openFile(path, this);
 }
 
 void MainWindow::setHardwareReport(hw::HwReport report) {
@@ -436,11 +492,21 @@ void MainWindow::notYetAvailable(const QString& feature) {
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
-    // Files from Explorer dropped anywhere on the window import into the bin.
-    if (event->mimeData()->hasUrls() && !ImportController::collectMediaPaths(event->mimeData()->urls()).isEmpty()) event->acceptProposedAction();
+    // Files from Explorer dropped anywhere on the window import into the bin;
+    // a project file opens.
+    if (!event->mimeData()->hasUrls()) return;
+    for (const QUrl& u : event->mimeData()->urls()) if (u.isLocalFile() && ProjectController::isProjectFile(u.toLocalFile())) { event->acceptProposedAction(); return; }
+    if (!ImportController::collectMediaPaths(event->mimeData()->urls()).isEmpty()) event->acceptProposedAction();
 }
 
 void MainWindow::dropEvent(QDropEvent* event) {
+    for (const QUrl& u : event->mimeData()->urls()) {
+        if (u.isLocalFile() && ProjectController::isProjectFile(u.toLocalFile())) {
+            event->acceptProposedAction();
+            openProjectFile(u.toLocalFile());
+            return;
+        }
+    }
     const QStringList paths = ImportController::collectMediaPaths(event->mimeData()->urls());
     if (paths.isEmpty()) return;
     event->acceptProposedAction();
@@ -448,6 +514,11 @@ void MainWindow::dropEvent(QDropEvent* event) {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
+    m_playback->pause();
+    if (!m_project->maybeSave(this)) {
+        event->ignore();
+        return;
+    }
     QSettings settings;
     settings.setValue(QStringLiteral("window/geometry"), saveGeometry());
     settings.setValue(QStringLiteral("window/mainSplitter"), m_mainSplitter->saveState());
