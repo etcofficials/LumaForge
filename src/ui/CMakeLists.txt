@@ -1,0 +1,53 @@
+qt_add_library(lf_ui STATIC
+    Theme.h                 Theme.cpp
+    Icons.h                 Icons.cpp
+    ActionRegistry.h        ActionRegistry.cpp
+    Timecode.h              Timecode.cpp
+    MainWindow.h            MainWindow.cpp
+    widgets/PanelHeader.h   widgets/PanelHeader.cpp
+    widgets/EmptyState.h    widgets/EmptyState.cpp
+    panels/MediaPanel.h     panels/MediaPanel.cpp
+    panels/InspectorPanel.h panels/InspectorPanel.cpp
+    preview/PreviewWidget.h preview/PreviewWidget.cpp
+    preview/PreviewPanel.h  preview/PreviewPanel.cpp
+    timeline/TimelineView.h timeline/TimelineView.cpp
+    timeline/TimelinePanel.h timeline/TimelinePanel.cpp
+    dialogs/DiagnosticsDialog.h dialogs/DiagnosticsDialog.cpp
+)
+add_library(lumaforge::ui ALIAS lf_ui)
+target_include_directories(lf_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(lf_ui
+    PUBLIC Qt6::Widgets Qt6::Svg
+           lumaforge::core lumaforge::commands lumaforge::hardware lumaforge::rendering lumaforge::diagnostics)
+
+# Theme + icons are compiled into the binary; no loose files to lose at runtime.
+qt_add_resources(lf_ui "lf_ui_resources"
+    PREFIX "/"
+    BASE "${CMAKE_SOURCE_DIR}/resources"
+    FILES
+        "${CMAKE_SOURCE_DIR}/resources/theme/lumaforge.qss"
+        "${CMAKE_SOURCE_DIR}/resources/icons/app.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/new.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/open.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/save.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/import.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/undo.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/redo.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/export.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/play.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/pause.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/stop.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/step-back.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/step-forward.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/go-start.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/go-end.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/split.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/delete.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/zoom-in.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/zoom-out.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/zoom-fit.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/magnet.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/diagnostics.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/media-empty.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/inspector-empty.svg"
+)

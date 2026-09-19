@@ -1,0 +1,29 @@
+# Build output
+/build/
+/out/
+
+# Vendored binaries (fetched by tools/fetch-portable-tools.ps1; see TOOLS.md)
+/third_party/ffmpeg/
+
+# Machine-specific CMake presets
+CMakeUserPresets.json
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.swp
+CMakeLists.txt.user*
+
+# Qt / MSVC artefacts
+*.pdb
+*.ilk
+*.obj
+*.exp
+*.autosave
+
+# Logs and temp
+*.log
+*.tmp

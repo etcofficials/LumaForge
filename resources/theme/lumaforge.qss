@@ -1,0 +1,284 @@
+/* LumaForge stylesheet. {{tokens}} are substituted from ui/Theme.cpp. */
+
+QMainWindow, QDialog {
+    background: {{bg.window}};
+}
+QWidget {
+    color: {{text.primary}};
+    selection-background-color: {{selection}};
+    selection-color: {{text.primary}};
+}
+QWidget:disabled {
+    color: {{text.disabled}};
+}
+QToolTip {
+    background: {{bg.elevated}};
+    color: {{text.primary}};
+    border: 1px solid {{border.strong}};
+    padding: 4px 6px;
+}
+
+/* ---------------------------------------------------------------- menus */
+QMenuBar {
+    background: {{bg.window}};
+    border-bottom: 1px solid {{border}};
+    padding: 0 4px;
+}
+QMenuBar::item {
+    padding: 5px 9px;
+    background: transparent;
+    border-radius: {{radius}}px;
+}
+QMenuBar::item:selected { background: {{bg.hover}}; }
+QMenuBar::item:pressed  { background: {{bg.pressed}}; }
+
+QMenu {
+    background: {{bg.elevated}};
+    border: 1px solid {{border.strong}};
+    padding: 4px 0;
+}
+QMenu::item {
+    padding: 5px 28px 5px 24px;
+}
+QMenu::item:selected { background: {{bg.hover}}; }
+QMenu::item:disabled { color: {{text.disabled}}; }
+QMenu::separator {
+    height: 1px;
+    background: {{border}};
+    margin: 4px 8px;
+}
+QMenu::icon { margin-left: 6px; }
+QMenu::indicator { width: 14px; height: 14px; margin-left: 6px; }
+
+/* ---------------------------------------------------------------- toolbars */
+QToolBar {
+    background: {{bg.window}};
+    border: none;
+    border-bottom: 1px solid {{border}};
+    padding: 3px 6px;
+    spacing: 2px;
+    min-height: {{toolbarHeight}}px;
+}
+QToolBar::separator {
+    width: 1px;
+    background: {{border}};
+    margin: 6px 6px;
+}
+QToolButton {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: {{radius}}px;
+    padding: 4px;
+    color: {{text.primary}};
+}
+QToolButton:hover   { background: {{bg.hover}}; }
+QToolButton:pressed { background: {{bg.pressed}}; }
+QToolButton:checked { background: {{bg.pressed}}; border-color: {{border.strong}}; }
+QToolButton:disabled { color: {{text.disabled}}; }
+QToolButton[primary="true"] {
+    background: {{accent}};
+    color: {{accent.text}};
+    padding: 4px 12px;
+    font-weight: 600;
+}
+QToolButton[primary="true"]:hover { background: {{accent.hover}}; }
+QToolButton[primary="true"]:disabled { background: {{bg.elevated}}; color: {{text.disabled}}; }
+QToolButton::menu-indicator { image: none; }
+
+/* ---------------------------------------------------------------- buttons */
+QPushButton {
+    background: {{bg.elevated}};
+    border: 1px solid {{border.strong}};
+    border-radius: {{radius}}px;
+    padding: 5px 14px;
+    min-height: 16px;
+}
+QPushButton:hover   { background: {{bg.hover}}; }
+QPushButton:pressed { background: {{bg.pressed}}; }
+QPushButton:default { border-color: {{accent}}; }
+QPushButton:disabled { background: {{bg.panel}}; border-color: {{border}}; }
+QPushButton[primary="true"] {
+    background: {{accent}};
+    border-color: {{accent}};
+    color: {{accent.text}};
+    font-weight: 600;
+}
+QPushButton[primary="true"]:hover { background: {{accent.hover}}; }
+
+/* ---------------------------------------------------------------- inputs */
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit, QTextEdit {
+    background: {{bg.input}};
+    border: 1px solid {{border}};
+    border-radius: {{radius}}px;
+    padding: 3px 6px;
+    selection-background-color: {{selection}};
+}
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus {
+    border-color: {{accent}};
+}
+QComboBox::drop-down { border: none; width: 18px; }
+QComboBox QAbstractItemView {
+    background: {{bg.elevated}};
+    border: 1px solid {{border.strong}};
+    selection-background-color: {{bg.hover}};
+    outline: none;
+}
+
+/* ---------------------------------------------------------------- panels */
+QWidget[panel="true"] {
+    background: {{bg.panel}};
+}
+QWidget[panelHeader="true"] {
+    background: {{bg.header}};
+    border-bottom: 1px solid {{border}};
+    min-height: {{panelHeaderHeight}}px;
+    max-height: {{panelHeaderHeight}}px;
+}
+QLabel[panelTitle="true"] {
+    color: {{text.secondary}};
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    padding-left: 10px;
+}
+QLabel[muted="true"] { color: {{text.muted}}; }
+QLabel[secondary="true"] { color: {{text.secondary}}; }
+QLabel[timecode="true"] {
+    font-family: "{{font.mono}}";
+    font-size: 12pt;
+    color: {{text.primary}};
+    padding: 0 6px;
+}
+QLabel[timecodeMuted="true"] {
+    font-family: "{{font.mono}}";
+    font-size: 12pt;
+    color: {{text.muted}};
+    padding: 0 6px;
+}
+QWidget[transport="true"] {
+    background: {{bg.panel}};
+    border-top: 1px solid {{border}};
+}
+
+/* ---------------------------------------------------------------- splitters */
+QSplitter::handle {
+    background: {{bg.window}};
+}
+QSplitter::handle:horizontal { width: {{splitterWidth}}px; }
+QSplitter::handle:vertical   { height: {{splitterWidth}}px; }
+QSplitter::handle:hover { background: {{border.strong}}; }
+
+/* ---------------------------------------------------------------- item views */
+QTreeView, QListView, QTableView {
+    background: {{bg.panel}};
+    border: none;
+    outline: none;
+    alternate-background-color: {{bg.header}};
+}
+QTreeView::item, QListView::item {
+    padding: 3px 4px;
+}
+QTreeView::item:hover, QListView::item:hover { background: {{bg.hover}}; }
+QTreeView::item:selected, QListView::item:selected { background: {{selection}}; }
+QHeaderView::section {
+    background: {{bg.header}};
+    color: {{text.secondary}};
+    border: none;
+    border-right: 1px solid {{border}};
+    border-bottom: 1px solid {{border}};
+    padding: 4px 6px;
+    font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- tabs */
+QTabWidget::pane {
+    border: 1px solid {{border}};
+    background: {{bg.panel}};
+    top: -1px;
+}
+QTabBar::tab {
+    background: {{bg.window}};
+    color: {{text.secondary}};
+    border: 1px solid {{border}};
+    border-bottom: none;
+    padding: 6px 14px;
+    margin-right: 2px;
+    border-top-left-radius: {{radius}}px;
+    border-top-right-radius: {{radius}}px;
+}
+QTabBar::tab:selected {
+    background: {{bg.panel}};
+    color: {{text.primary}};
+}
+QTabBar::tab:hover:!selected { background: {{bg.hover}}; }
+
+/* ---------------------------------------------------------------- scrollbars */
+QScrollBar:vertical {
+    background: transparent;
+    width: 12px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background: {{border.strong}};
+    border-radius: 4px;
+    min-height: 24px;
+    margin: 2px 3px;
+}
+QScrollBar::handle:vertical:hover { background: {{text.muted}}; }
+QScrollBar:horizontal {
+    background: transparent;
+    height: 12px;
+    margin: 0;
+}
+QScrollBar::handle:horizontal {
+    background: {{border.strong}};
+    border-radius: 4px;
+    min-width: 24px;
+    margin: 3px 2px;
+}
+QScrollBar::handle:horizontal:hover { background: {{text.muted}}; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
+/* ---------------------------------------------------------------- status bar */
+QStatusBar {
+    background: {{bg.window}};
+    border-top: 1px solid {{border}};
+    color: {{text.secondary}};
+}
+QStatusBar::item { border: none; }
+QStatusBar QLabel { color: {{text.secondary}}; padding: 0 8px; }
+QStatusBar QLabel[ok="true"]   { color: {{success}}; }
+QStatusBar QLabel[warn="true"] { color: {{warning}}; }
+
+/* ---------------------------------------------------------------- misc */
+QSlider::groove:horizontal {
+    height: 3px;
+    background: {{border.strong}};
+    border-radius: 1px;
+}
+QSlider::handle:horizontal {
+    width: 10px;
+    height: 10px;
+    margin: -4px 0;
+    background: {{text.secondary}};
+    border-radius: 5px;
+}
+QSlider::handle:horizontal:hover { background: {{text.primary}}; }
+QCheckBox::indicator, QRadioButton::indicator { width: 14px; height: 14px; }
+QGroupBox {
+    border: 1px solid {{border}};
+    border-radius: {{radius}}px;
+    margin-top: 10px;
+    padding-top: 8px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 8px;
+    padding: 0 4px;
+    color: {{text.secondary}};
+}
+QPlainTextEdit[log="true"] {
+    font-family: "{{font.mono}}";
+    font-size: 9pt;
+    background: {{bg.input}};
+}
