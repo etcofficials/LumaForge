@@ -32,6 +32,8 @@ QString joinExt(const std::vector<std::string>& exts) {
 
 ImportController::ImportController(project::Document& doc, QObject* parent) : QObject(parent), m_doc(doc) {}
 
+ImportController::~ImportController() = default;
+
 QString ImportController::fileDialogFilter() {
     const QString video = joinExt(media::MediaProbe::videoExtensions());
     const QString audio = joinExt(media::MediaProbe::audioExtensions());

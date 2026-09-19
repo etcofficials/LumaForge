@@ -11,6 +11,7 @@
 #include "ui/media/ImportController.h"
 #include "ui/panels/InspectorPanel.h"
 #include "ui/panels/MediaPanel.h"
+#include "ui/playback/PlaybackController.h"
 #include "ui/preview/PreviewPanel.h"
 #include "ui/preview/PreviewWidget.h"
 #include "ui/timeline/TimelinePanel.h"
@@ -18,12 +19,14 @@
 
 #include <QApplication>
 #include <QCloseEvent>
+#include <QDir>
+#include <QFileInfo>
 #include <QDragEnterEvent>
 #include <QDropEvent>
-#include <QMimeData>
 #include <QLabel>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QSettings>
 #include <QSplitter>
 #include <QStatusBar>
@@ -40,7 +43,8 @@ constexpr const char* kLog = "ui";
 
 MainWindow::MainWindow(std::shared_ptr<hw::GpuDevice> gpu, std::shared_ptr<log::RingBufferSink> logSink, QWidget* parent)
     : QMainWindow(parent), m_gpu(std::move(gpu)), m_logSink(std::move(logSink)), m_actions(new ActionRegistry(this)),
-      m_document(std::make_unique<project::Document>()), m_importer(new ImportController(*m_document, this)) {
+      m_document(std::make_unique<project::Document>()), m_importer(new ImportController(*m_document, this)),
+      m_playback(new PlaybackController(m_gpu, true, this)) {
     setAcceptDrops(true);
     setWindowIcon(QIcon(QStringLiteral(":/icons/app.svg")));
     setMinimumSize(1024, 640);
@@ -56,31 +60,45 @@ MainWindow::MainWindow(std::shared_ptr<hw::GpuDevice> gpu, std::shared_ptr<log::
     m_document->undoStack().setChangeListener([this] { updateUndoActions(); updateWindowTitle(); });
     updateUndoActions();
     updateWindowTitle();
-    updateTimeReadouts();
-
-    m_playbackTimer.setTimerType(Qt::PreciseTimer);
-    connect(&m_playbackTimer, &QTimer::timeout, this, &MainWindow::onPlaybackTick);
 
     QSettings settings;
     restoreGeometry(settings.value(QStringLiteral("window/geometry")).toByteArray());
     if (settings.contains(QStringLiteral("window/mainSplitter"))) m_mainSplitter->restoreState(settings.value(QStringLiteral("window/mainSplitter")).toByteArray());
     if (settings.contains(QStringLiteral("window/topSplitter"))) m_topSplitter->restoreState(settings.value(QStringLiteral("window/topSplitter")).toByteArray());
 
-    // The preview goes to the GPU as soon as the window exists; the surface
-    // falls back to software by itself if the device is unusable.
-    m_previewPanel->surface()->setGpuDevice(m_gpu);
-    m_previewPanel->surface()->setFrameSize(m_projectWidth, m_projectHeight);
-    connect(m_previewPanel->surface(), &PreviewWidget::backendChanged, this, [this] {
+    // The preview surface belongs to the playback engine's render thread.
+    m_previewPanel->surface()->setEngine(m_playback->engine(), m_gpu);
+    auto updatePreviewStatus = [this] {
         m_statusPreview->setText(tr("Preview: %1").arg(m_previewPanel->surface()->backendName()));
         m_statusPreview->setProperty("ok", m_previewPanel->surface()->usingHardware());
         m_statusPreview->style()->unpolish(m_statusPreview);
         m_statusPreview->style()->polish(m_statusPreview);
-    });
-    m_statusPreview->setText(tr("Preview: %1").arg(m_previewPanel->surface()->backendName()));
+    };
+    connect(m_previewPanel->surface(), &PreviewWidget::backendChanged, this, updatePreviewStatus);
+    updatePreviewStatus();
+    if (!m_playback->isAvailable()) LF_LOG_WARN(kLog, "playback unavailable: {}", m_playback->unavailableReason().toStdString());
     LF_LOG_INFO(kLog, "main window ready");
 }
 
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow() {
+    // Teardown order matters:
+    //  1. The preview surface belongs to the engine's render thread; detach it
+    //     before the playback controller (created earlier, so deleted earlier
+    //     by ~QObject) takes the engine down.
+    //  2. Panels observe m_document (a plain member, destroyed before the Qt
+    //     children), so they must go while the document is still alive.
+    //     setCentralWidget(nullptr) only deleteLater()s the old widget, which
+    //     never runs once the event loop has finished - take and delete it.
+    m_playback->pause();
+    m_previewPanel->surface()->setEngine(nullptr, nullptr);
+    delete m_diagnostics.data();
+    delete takeCentralWidget();
+    m_mediaPanel = nullptr; m_previewPanel = nullptr; m_inspectorPanel = nullptr; m_timelinePanel = nullptr;
+    delete m_playback; m_playback = nullptr;
+    delete m_importer; m_importer = nullptr;
+    m_document.reset();
+    LF_LOG_DEBUG(kLog, "main window shut down");
+}
 
 // ---------------------------------------------------------------- construction
 
@@ -167,7 +185,7 @@ void MainWindow::buildToolBar() {
 
 void MainWindow::buildCentralLayout() {
     m_mediaPanel = new MediaPanel(*m_document, *m_actions, *m_importer, this);
-    m_previewPanel = new PreviewPanel(*m_actions, this);
+    m_previewPanel = new PreviewPanel(*m_actions, *m_playback, this);
     m_inspectorPanel = new InspectorPanel(this);
     m_timelinePanel = new TimelinePanel(*m_actions, this);
 
@@ -195,7 +213,7 @@ void MainWindow::buildCentralLayout() {
     layout->addWidget(m_mainSplitter);
     setCentralWidget(central);
 
-    m_timelinePanel->view()->setFrameRate(m_projectFps);
+    m_timelinePanel->view()->setFrameRate(m_document->project().settings.frameRate);
 }
 
 void MainWindow::buildStatusBar() {
@@ -211,32 +229,41 @@ void MainWindow::buildStatusBar() {
 }
 
 void MainWindow::connectActions() {
-    auto* tl = m_timelinePanel->view();
-
     m_actions->connect(ActionId::ProjectNew, this, [this] { notYetAvailable(tr("New Project")); });
     m_actions->connect(ActionId::ProjectOpen, this, [this] { notYetAvailable(tr("Open Project")); });
     m_actions->connect(ActionId::ProjectSave, this, [this] { notYetAvailable(tr("Save")); });
     m_actions->connect(ActionId::ProjectSaveAs, this, [this] { notYetAvailable(tr("Save As")); });
     m_actions->connect(ActionId::ProjectSettings, this, [this] { notYetAvailable(tr("Project Settings")); });
+    m_actions->connect(ActionId::Export, this, [this] { notYetAvailable(tr("Export")); });
+    m_actions->connect(ActionId::AppQuit, this, [this] { close(); });
+
+    // Media
     m_actions->connect(ActionId::MediaImport, this, [this] { m_importer->importWithDialog(this); });
     connect(m_importer, &ImportController::importStarted, this, [this](int n) { statusBar()->showMessage(tr("Importing %n file(s)…", nullptr, n)); });
     connect(m_importer, &ImportController::importFinished, this, [this](int ok, int failed) {
         statusBar()->showMessage(failed ? tr("Imported %1, %2 failed").arg(ok).arg(failed) : tr("Imported %n file(s)", nullptr, ok), 4000);
     });
-    connect(m_mediaPanel, &MediaPanel::openRequested, this, [this](project::MediaId) { notYetAvailable(tr("Source preview")); });
+    connect(m_mediaPanel, &MediaPanel::openRequested, this, [this](project::MediaId id) {
+        if (const auto* item = m_document->project().findMedia(id)) m_playback->openSource(*item);
+    });
     connect(m_mediaPanel, &MediaPanel::addToTimelineRequested, this, [this](const QList<project::MediaId>&) { notYetAvailable(tr("Add to timeline")); });
-    m_actions->connect(ActionId::Export, this, [this] { notYetAvailable(tr("Export")); });
-    m_actions->connect(ActionId::AppQuit, this, [this] { close(); });
 
+    // Edit
     m_actions->connect(ActionId::EditUndo, this, [this] { m_document->undoStack().undo(); });
     m_actions->connect(ActionId::EditRedo, this, [this] { m_document->undoStack().redo(); });
 
-    m_actions->connect(ActionId::PlayPause, this, [this] { togglePlayback(); });
-    m_actions->connect(ActionId::PlayStop, this, [this] { stopPlayback(); });
-    m_actions->connect(ActionId::StepBack, this, [tl] { tl->stepFrames(-1); });
-    m_actions->connect(ActionId::StepForward, this, [tl] { tl->stepFrames(1); });
-    m_actions->connect(ActionId::GoToStart, this, [tl] { tl->goToStart(); });
-    m_actions->connect(ActionId::GoToEnd, this, [tl] { tl->goToEnd(); });
+    // Transport -> playback engine
+    m_actions->connect(ActionId::PlayPause, this, [this] { m_playback->togglePlay(); });
+    m_actions->connect(ActionId::PlayStop, this, [this] { m_playback->stop(); });
+    m_actions->connect(ActionId::StepBack, this, [this] { m_playback->stepFrames(-1); });
+    m_actions->connect(ActionId::StepForward, this, [this] { m_playback->stepFrames(1); });
+    m_actions->connect(ActionId::GoToStart, this, [this] { m_playback->goToStart(); });
+    m_actions->connect(ActionId::GoToEnd, this, [this] { m_playback->goToEnd(); });
+    connect(m_playback, &PlaybackController::statsChanged, this, [this](const playback::PlaybackStats& s) {
+        m_statusFps->setText(m_playback->isPlaying() ? tr("%1 fps").arg(s.previewFps, 0, 'f', 1) : tr("— fps"));
+    });
+    connect(m_playback, &PlaybackController::playingChanged, this, [this](bool p) { if (!p) m_statusFps->setText(tr("— fps")); });
+    connect(m_playback, &PlaybackController::errorOccurred, this, [this](const QString& m) { statusBar()->showMessage(tr("Playback: %1").arg(m), 6000); });
 
     m_actions->connect(ActionId::ViewDiagnostics, this, [this] { showDiagnostics(); });
     m_actions->connect(ActionId::HelpAbout, this, [this] {
@@ -244,12 +271,6 @@ void MainWindow::connectActions() {
                            tr("<b>LumaForge %1</b><br>Lightweight professional video editor.<br><br>"
                               "Built with Qt %2 and FFmpeg.<br>Build: %3")
                                .arg(QString::fromLatin1(version::string), QString::fromLatin1(qVersion()), QString::fromLatin1(version::buildType)));
-    });
-
-    connect(tl, &TimelineView::playheadChanged, this, [this] { updateTimeReadouts(); });
-    connect(tl, &TimelineView::playheadScrubbed, this, [this] {
-        // Scrubbing while playing hands control to the user.
-        if (m_playing) { m_playbackOrigin = m_timelinePanel->view()->playhead(); m_playbackClock.restart(); }
     });
 }
 
@@ -266,13 +287,8 @@ void MainWindow::updateUndoActions() {
 }
 
 void MainWindow::updateWindowTitle() {
-    const QString name = m_projectName.isEmpty() ? tr("Untitled") : m_projectName;
-    setWindowTitle(QStringLiteral("%1%2 — LumaForge").arg(name, m_document->isDirty() ? QStringLiteral("*") : QString()));
-}
-
-void MainWindow::updateTimeReadouts() {
-    auto* tl = m_timelinePanel->view();
-    m_previewPanel->setTime(tl->playhead(), tl->sequenceDuration(), m_projectFps);
+    const QString name = QString::fromStdString(m_document->project().settings.name);
+    setWindowTitle(QStringLiteral("%1%2 — LumaForge").arg(name.isEmpty() ? tr("Untitled") : name, m_document->isDirty() ? QStringLiteral("*") : QString()));
 }
 
 void MainWindow::setHardwareReport(hw::HwReport report) {
@@ -293,6 +309,30 @@ void MainWindow::openDiagnostics(const QString& tab) { showDiagnostics(tab); }
 
 void MainWindow::importFiles(const QStringList& paths) { m_importer->importFiles(paths, this); }
 
+void MainWindow::openSourceFile(const QString& path, bool autoplay) {
+    const QString native = QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath());
+    auto openIt = [this, autoplay](const project::MediaItem& item) {
+        m_playback->openSource(item);
+        if (autoplay) m_playback->play();
+    };
+    if (const auto* existing = m_document->project().findMediaByPath(native.toStdString())) {
+        openIt(*existing);
+        return;
+    }
+    auto conn = std::make_shared<QMetaObject::Connection>();
+    *conn = connect(m_importer, &ImportController::mediaImported, this, [this, native, openIt, conn](const QList<project::MediaId>& ids) {
+        for (auto id : ids) {
+            const auto* item = m_document->project().findMedia(id);
+            if (item && QString::fromStdString(item->path).compare(native, Qt::CaseInsensitive) == 0) {
+                QObject::disconnect(*conn);
+                openIt(*item);
+                return;
+            }
+        }
+    });
+    m_importer->importFiles({native}, this);
+}
+
 void MainWindow::showDiagnostics(const QString& tab) {
     if (!m_diagnostics) {
         m_diagnostics = new DiagnosticsDialog(m_logSink, this);
@@ -312,51 +352,6 @@ void MainWindow::notYetAvailable(const QString& feature) {
     statusBar()->showMessage(tr("%1 arrives with the next milestone.").arg(feature), 3000);
 }
 
-// ---------------------------------------------------------------- placeholder transport
-
-void MainWindow::togglePlayback() {
-    auto* tl = m_timelinePanel->view();
-    if (m_playing) {
-        m_playing = false;
-        m_playbackTimer.stop();
-    } else {
-        if (tl->playhead().ticks >= tl->sequenceDuration().ticks) tl->goToStart();
-        m_playing = true;
-        m_playbackOrigin = tl->playhead();
-        m_playbackClock.start();
-        // Tick at roughly half a frame so the playhead never skips a visible step.
-        const double frameMs = 1000.0 / std::max(1.0, m_projectFps.toDouble());
-        m_playbackTimer.start(std::max(4, static_cast<int>(frameMs / 2)));
-    }
-    m_previewPanel->setPlaying(m_playing);
-}
-
-void MainWindow::stopPlayback() {
-    auto* tl = m_timelinePanel->view();
-    if (m_playing) {
-        m_playing = false;
-        m_playbackTimer.stop();
-        m_previewPanel->setPlaying(false);
-        tl->setPlayhead(m_playbackOrigin);
-    } else {
-        tl->goToStart();
-    }
-}
-
-void MainWindow::onPlaybackTick() {
-    auto* tl = m_timelinePanel->view();
-    const auto elapsed = Duration::fromMilliseconds(m_playbackClock.elapsed());
-    const TimePoint t = m_playbackOrigin + elapsed;
-    if (t.ticks >= tl->sequenceDuration().ticks) {
-        tl->setPlayhead(TimePoint{tl->sequenceDuration().ticks});
-        m_playing = false;
-        m_playbackTimer.stop();
-        m_previewPanel->setPlaying(false);
-        return;
-    }
-    tl->setPlayhead(t);
-}
-
 void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
     // Files from Explorer dropped anywhere on the window import into the bin.
     if (event->mimeData()->hasUrls() && !ImportController::collectMediaPaths(event->mimeData()->urls()).isEmpty()) event->acceptProposedAction();
@@ -374,6 +369,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     settings.setValue(QStringLiteral("window/geometry"), saveGeometry());
     settings.setValue(QStringLiteral("window/mainSplitter"), m_mainSplitter->saveState());
     settings.setValue(QStringLiteral("window/topSplitter"), m_topSplitter->saveState());
+    // Stop presentation before Qt tears the native window down.
+    m_playback->pause();
     QMainWindow::closeEvent(event);
 }
 

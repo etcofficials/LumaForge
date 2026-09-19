@@ -45,6 +45,8 @@ SDK_MSIS = [
     "Windows SDK Signing Tools-x86_en-us.msi",
     "Universal CRT Headers Libraries and Sources-x86_en-us.msi",
 ]
+# Debugging Tools for Windows (cdb etc.) are NOT part of the VS manifest; see
+# tools/fetch-debuggers.ps1 for the optional winsdksetup.exe layout route.
 
 
 def log(msg):
@@ -136,42 +138,9 @@ def move_tree_up(src_root, dest_root):
     shutil.rmtree(src_root, ignore_errors=True)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--msvc-dest", required=True)
-    ap.add_argument("--sdk-dest", required=True)
-    ap.add_argument("--cache", required=True)
-    ap.add_argument("--no-asan", action="store_true", help="skip AddressSanitizer runtime (64 MB)")
-    a = ap.parse_args()
-    for d in (a.msvc_dest, a.sdk_dest, a.cache):
-        os.makedirs(d, exist_ok=True)
 
-    log("== Reading Visual Studio release manifest")
-    channel = fetch_json(CHANNEL_URL, os.path.join(a.cache, "channel.json"))
-    man_item = next(i for i in channel["channelItems"] if i["id"] == "Microsoft.VisualStudio.Manifests.VisualStudio")
-    manifest = fetch_json(man_item["payloads"][0]["url"], os.path.join(a.cache, "manifest.json"))
-    pkgs = manifest["packages"]
-    log("   VS channel %s" % channel.get("info", {}).get("productDisplayVersion", "?"))
-
-    pat = re.compile(r"Microsoft\.VC\.(\d+\.\d+\.\d+\.\d+)\.Tools\.Host%s\.Target%s\.base$" % (HOST, TARGET))
-    versions = sorted({m.group(1) for p in pkgs for m in [pat.match(p["id"])] if m},
-                      key=lambda v: tuple(map(int, v.split("."))))
-    ver = versions[-1]
-    log("   MSVC toolset package version %s" % ver)
-
-    # ---------------------------------------------------------------- MSVC
-    ids = [
-        "Microsoft.VC.%s.Tools.Host%s.Target%s.base" % (ver, HOST, TARGET),
-        "Microsoft.VC.%s.Tools.Host%s.Target%s.Res.base" % (ver, HOST, TARGET),
-        "Microsoft.VC.%s.CRT.Headers.base" % ver,
-        "Microsoft.VC.%s.CRT.%s.Desktop.base" % (ver, TARGET.lower()),
-        "Microsoft.VC.%s.CRT.%s.Store.base" % (ver, TARGET.lower()),
-        "Microsoft.VC.%s.CRT.Redist.%s.base" % (ver, TARGET),
-        "Microsoft.VC.%s.CRT.Source.base" % ver,
-    ]
-    if not a.no_asan:
-        ids += ["Microsoft.VC.%s.ASAN.Headers.base" % ver, "Microsoft.VC.%s.ASAN.%s.base" % (ver, TARGET)]
-
+def extract_msvc(a, pkgs, ver, ids):
+    """Downloads and extracts the MSVC toolset + redist + debug UCRT. Returns the toolset version."""
     log("== MSVC toolset")
     stage = os.path.join(a.cache, "msvc_stage")
     shutil.rmtree(stage, ignore_errors=True)
@@ -202,8 +171,7 @@ def main():
         d = os.path.join(a.msvc_dest, "Auxiliary")
         shutil.rmtree(d, ignore_errors=True)
         shutil.move(aux, d)
-    leftovers = [os.path.relpath(os.path.join(root, fn), stage)
-                 for root, _, files in os.walk(stage) for fn in files]
+    leftovers = [os.path.relpath(os.path.join(root, fn), stage) for root, _, files in os.walk(stage) for fn in files]
     if leftovers:
         log("   note: %d unclaimed staged file(s), e.g. %s" % (len(leftovers), leftovers[:5]))
     shutil.rmtree(stage, ignore_errors=True)
@@ -215,7 +183,7 @@ def main():
                 os.remove(os.path.join(root, fn))
     log("   MSVC %s -> %s" % (tool_ver, dest_tools))
 
-    # ------------------------------------------------ Debug UCRT (ucrtbased.dll)
+    # debug UCRT (ucrtbased.dll and friends) ships as an MSI
     log("== Debug UCRT runtime")
     dbg = first(pkgs, "Microsoft.VisualCpp.RuntimeDebug.14", chip="x64")
     dbg_dir = os.path.join(a.cache, "runtimedebug_x64")
@@ -233,11 +201,13 @@ def main():
                 shutil.copy2(os.path.join(root, fn), dbg_out)
     shutil.rmtree(dbg_stage, ignore_errors=True)
     log("   -> %s: %s" % (dbg_out, os.listdir(dbg_out)))
+    return tool_ver
 
-    # ---------------------------------------------------------------- Windows SDK
+
+def extract_sdk(a, pkgs):
+    """Downloads and extracts the Windows SDK subset in SDK_MSIS. Returns the SDK version."""
     log("== Windows SDK")
-    sdk = sorted([p for p in pkgs if re.match(r"Win1[01]SDK_10\.0\.\d+$", p["id"])],
-                 key=lambda p: int(p["id"].split(".")[-1]))[-1]
+    sdk = sorted([p for p in pkgs if re.match(r"Win1[01]SDK_10\.0\.\d+$", p["id"])], key=lambda p: int(p["id"].split(".")[-1]))[-1]
     log("   package %s" % sdk["id"])
     by_name = {pl["fileName"].split("\\")[-1]: pl for pl in sdk["payloads"]}
     sdk_cache = os.path.join(a.cache, "sdk")
@@ -264,6 +234,58 @@ def main():
     shutil.rmtree(sdk_stage, ignore_errors=True)
     sdk_ver = sorted(os.listdir(os.path.join(a.sdk_dest, "Include")))[-1]
     log("   Windows SDK %s -> %s" % (sdk_ver, a.sdk_dest))
+    return sdk_ver
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--msvc-dest", required=True)
+    ap.add_argument("--sdk-dest", required=True)
+    ap.add_argument("--cache", required=True)
+    ap.add_argument("--no-asan", action="store_true", help="skip AddressSanitizer runtime (64 MB)")
+    ap.add_argument("--skip-msvc", action="store_true", help="leave the installed MSVC toolset alone; only (re)extract the SDK")
+    ap.add_argument("--skip-sdk", action="store_true", help="leave the installed Windows SDK alone; only (re)extract MSVC")
+    a = ap.parse_args()
+    for d in (a.msvc_dest, a.sdk_dest, a.cache):
+        os.makedirs(d, exist_ok=True)
+
+    log("== Reading Visual Studio release manifest")
+    channel = fetch_json(CHANNEL_URL, os.path.join(a.cache, "channel.json"))
+    man_item = next(i for i in channel["channelItems"] if i["id"] == "Microsoft.VisualStudio.Manifests.VisualStudio")
+    manifest = fetch_json(man_item["payloads"][0]["url"], os.path.join(a.cache, "manifest.json"))
+    pkgs = manifest["packages"]
+    log("   VS channel %s" % channel.get("info", {}).get("productDisplayVersion", "?"))
+
+    pat = re.compile(r"Microsoft\.VC\.(\d+\.\d+\.\d+\.\d+)\.Tools\.Host%s\.Target%s\.base$" % (HOST, TARGET))
+    versions = sorted({m.group(1) for p in pkgs for m in [pat.match(p["id"])] if m}, key=lambda v: tuple(map(int, v.split("."))))
+    ver = versions[-1]
+    log("   MSVC toolset package version %s" % ver)
+
+    ids = [
+        "Microsoft.VC.%s.Tools.Host%s.Target%s.base" % (ver, HOST, TARGET),
+        "Microsoft.VC.%s.Tools.Host%s.Target%s.Res.base" % (ver, HOST, TARGET),
+        "Microsoft.VC.%s.CRT.Headers.base" % ver,
+        "Microsoft.VC.%s.CRT.%s.Desktop.base" % (ver, TARGET.lower()),
+        "Microsoft.VC.%s.CRT.%s.Store.base" % (ver, TARGET.lower()),
+        "Microsoft.VC.%s.CRT.Redist.%s.base" % (ver, TARGET),
+        "Microsoft.VC.%s.CRT.Source.base" % ver,
+    ]
+    if not a.no_asan:
+        ids += ["Microsoft.VC.%s.ASAN.Headers.base" % ver, "Microsoft.VC.%s.ASAN.%s.base" % (ver, TARGET)]
+
+    if a.skip_msvc:
+        existing = [d for d in os.listdir(a.msvc_dest) if re.match(r"\d+\.\d+\.\d+$", d)]
+        tool_ver = sorted(existing, key=lambda v: tuple(map(int, v.split("."))))[-1] if existing else "?"
+        log("== MSVC toolset: skipped (keeping %s)" % tool_ver)
+    else:
+        tool_ver = extract_msvc(a, pkgs, ver, ids)
+
+    if a.skip_sdk:
+        inc = os.path.join(a.sdk_dest, "Include")
+        sdk_ver = sorted(os.listdir(inc))[-1] if os.path.isdir(inc) and os.listdir(inc) else "?"
+        log("== Windows SDK: skipped (keeping %s)" % sdk_ver)
+    else:
+        sdk_ver = extract_sdk(a, pkgs)
 
     with open(os.path.join(a.msvc_dest, "PORTABLE-TOOLCHAIN.json"), "w") as f:
         json.dump({"msvc_version": tool_ver, "msvc_manifest_version": ver, "sdk_version": sdk_ver,

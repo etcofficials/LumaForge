@@ -43,6 +43,10 @@ public:
     // owner then recreates the device and this renderer.
     Status render(const PreviewScene& scene);
 
+    // For the compositor's blit: the swap chain's back buffer view, then present().
+    [[nodiscard]] ID3D11RenderTargetView* backBuffer() const noexcept { return m_rtv.Get(); }
+    Status present(bool vsync);
+
     [[nodiscard]] IntRect lastFrameRect() const noexcept { return m_frameRect; }
     [[nodiscard]] int width() const noexcept { return m_width; }
     [[nodiscard]] int height() const noexcept { return m_height; }

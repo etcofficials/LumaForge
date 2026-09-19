@@ -4,17 +4,27 @@
 #include "ui/Icons.h"
 #include "ui/Theme.h"
 #include "ui/Timecode.h"
+#include "ui/playback/PlaybackController.h"
 #include "ui/preview/PreviewWidget.h"
+#include "ui/widgets/EmptyState.h"
 
 #include <QAction>
+#include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QSettings>
+#include <QStackedWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 namespace lf::ui {
 
-PreviewPanel::PreviewPanel(ActionRegistry& actions, QWidget* parent) : QWidget(parent), m_actions(actions) {
+namespace {
+constexpr const char* kQualityKey = "preview/quality";
+}
+
+PreviewPanel::PreviewPanel(ActionRegistry& actions, PlaybackController& playback, QWidget* parent)
+    : QWidget(parent), m_actions(actions), m_playback(playback) {
     setProperty("panel", true);
     setAttribute(Qt::WA_StyledBackground, true);
 
@@ -22,8 +32,14 @@ PreviewPanel::PreviewPanel(ActionRegistry& actions, QWidget* parent) : QWidget(p
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
+    m_stack = new QStackedWidget(this);
+    m_empty = new EmptyState(QStringLiteral("media-video"), tr("No media to preview"),
+                             tr("Double-click a media item to preview it,\nor add clips to the timeline."), this);
     m_surface = new PreviewWidget(this);
-    layout->addWidget(m_surface, 1);
+    m_stack->addWidget(m_empty);
+    m_stack->addWidget(m_surface);
+    m_stack->setCurrentWidget(m_empty);
+    layout->addWidget(m_stack, 1);
 
     auto* transport = new QWidget(this);
     transport->setProperty("transport", true);
@@ -37,6 +53,10 @@ PreviewPanel::PreviewPanel(ActionRegistry& actions, QWidget* parent) : QWidget(p
     m_currentTime->setProperty("timecode", true);
     m_currentTime->setToolTip(tr("Current time"));
     row->addWidget(m_currentTime);
+    m_sourceLabel = new QLabel(transport);
+    m_sourceLabel->setProperty("muted", true);
+    m_sourceLabel->setMinimumWidth(80);
+    row->addWidget(m_sourceLabel);
     row->addStretch(1);
 
     row->addWidget(transportButton(actions.action(ActionId::GoToStart)));
@@ -48,13 +68,54 @@ PreviewPanel::PreviewPanel(ActionRegistry& actions, QWidget* parent) : QWidget(p
     row->addWidget(transportButton(actions.action(ActionId::GoToEnd)));
 
     row->addStretch(1);
+    m_statsLabel = new QLabel(transport);
+    m_statsLabel->setProperty("muted", true);
+    m_statsLabel->setToolTip(tr("Preview render size, decoder and frame rate"));
+    row->addWidget(m_statsLabel);
+    row->addSpacing(6);
+
+    m_muteButton = new QToolButton(transport);
+    m_muteButton->setCheckable(true);
+    m_muteButton->setAutoRaise(true);
+    m_muteButton->setFixedSize(26, 26);
+    m_muteButton->setIcon(Icons::icon(QStringLiteral("audio")));
+    m_muteButton->setToolTip(tr("Mute preview audio"));
+    m_muteButton->setFocusPolicy(Qt::NoFocus);
+    connect(m_muteButton, &QToolButton::toggled, this, [this](bool on) {
+        m_playback.setMuted(on);
+        m_muteButton->setIcon(Icons::icon(on ? QStringLiteral("audio-muted") : QStringLiteral("audio")));
+    });
+    row->addWidget(m_muteButton);
+
+    m_quality = new QComboBox(transport);
+    m_quality->setToolTip(tr("Preview quality (does not affect export)"));
+    m_quality->setFocusPolicy(Qt::NoFocus);
+    for (auto q : {playback::PreviewQuality::Auto, playback::PreviewQuality::P360, playback::PreviewQuality::P480, playback::PreviewQuality::P720, playback::PreviewQuality::Full}) {
+        m_quality->addItem(QString::fromLatin1(playback::previewQualityName(q)), static_cast<int>(q));
+    }
+    const int savedQ = QSettings().value(QString::fromLatin1(kQualityKey), 0).toInt();
+    m_quality->setCurrentIndex(std::clamp(savedQ, 0, m_quality->count() - 1));
+    m_playback.setQuality(static_cast<playback::PreviewQuality>(m_quality->currentData().toInt()));
+    connect(m_quality, &QComboBox::currentIndexChanged, this, [this](int idx) {
+        const auto q = static_cast<playback::PreviewQuality>(m_quality->itemData(idx).toInt());
+        m_playback.setQuality(q);
+        QSettings().setValue(QString::fromLatin1(kQualityKey), idx);
+    });
+    row->addWidget(m_quality);
+    row->addSpacing(6);
+
     m_totalTime = new QLabel(QStringLiteral("00:00:00:00"), transport);
     m_totalTime->setProperty("timecodeMuted", true);
-    m_totalTime->setToolTip(tr("Sequence duration"));
+    m_totalTime->setToolTip(tr("Duration"));
     row->addWidget(m_totalTime);
-
     layout->addWidget(transport);
-    setPlaying(false);
+
+    connect(&m_playback, &PlaybackController::positionChanged, this, [this](TimePoint) { updateTime(); });
+    connect(&m_playback, &PlaybackController::playingChanged, this, [this](bool p) { updatePlaying(p); });
+    connect(&m_playback, &PlaybackController::programChanged, this, [this] { updateProgram(); });
+    connect(&m_playback, &PlaybackController::statsChanged, this, [this](const playback::PlaybackStats& s) { updateStats(s); });
+    updatePlaying(false);
+    updateProgram();
 }
 
 QToolButton* PreviewPanel::transportButton(QAction* action, bool emphasised) {
@@ -65,21 +126,43 @@ QToolButton* PreviewPanel::transportButton(QAction* action, bool emphasised) {
     b->setFocusPolicy(Qt::NoFocus);
     b->setIconSize(emphasised ? QSize(22, 22) : QSize(16, 16));
     b->setFixedSize(emphasised ? QSize(36, 30) : QSize(28, 28));
-    // Tooltip shows the shortcut so the keyboard workflow is discoverable.
     const QString sc = action->shortcut().toString(QKeySequence::NativeText);
     b->setToolTip(sc.isEmpty() ? action->text().remove('&') : QStringLiteral("%1  (%2)").arg(action->text().remove('&'), sc));
     return b;
 }
 
-void PreviewPanel::setTime(TimePoint current, Duration total, Rational fps) {
-    m_currentTime->setText(formatTimecode(current, fps));
-    m_totalTime->setText(formatTimecode(TimePoint{total.ticks}, fps));
+void PreviewPanel::updateTime() {
+    const Rational fps = m_playback.frameRate();
+    m_currentTime->setText(formatTimecode(m_playback.position(), fps));
+    m_totalTime->setText(formatTimecode(TimePoint{m_playback.duration().ticks}, fps));
 }
 
-void PreviewPanel::setPlaying(bool playing) {
+void PreviewPanel::updatePlaying(bool playing) {
     auto* a = m_actions.action(ActionId::PlayPause);
     a->setIcon(Icons::icon(playing ? QStringLiteral("pause") : QStringLiteral("play"), Theme::palette().textPrimary));
     a->setText(playing ? tr("&Pause") : tr("&Play"));
+}
+
+void PreviewPanel::updateProgram() {
+    const bool has = m_playback.mode() != PlaybackController::Mode::None && m_playback.isAvailable();
+    m_stack->setCurrentWidget(has ? static_cast<QWidget*>(m_surface) : static_cast<QWidget*>(m_empty));
+    if (!m_playback.isAvailable()) m_stack->setCurrentWidget(m_surface);   // shows the "unavailable" placeholder
+    switch (m_playback.mode()) {
+        case PlaybackController::Mode::Source: m_sourceLabel->setText(tr("Source · %1").arg(m_playback.sourceName())); break;
+        case PlaybackController::Mode::Sequence: m_sourceLabel->setText(tr("Timeline")); break;
+        default: m_sourceLabel->clear(); break;
+    }
+    const bool enabled = has;
+    for (auto id : {ActionId::PlayPause, ActionId::PlayStop, ActionId::StepBack, ActionId::StepForward, ActionId::GoToStart, ActionId::GoToEnd}) m_actions.setEnabled(id, enabled);
+    updateTime();
+}
+
+void PreviewPanel::updateStats(const playback::PlaybackStats& s) {
+    if (m_playback.mode() == PlaybackController::Mode::None) { m_statsLabel->clear(); return; }
+    QString text = QStringLiteral("%1×%2 · %3").arg(s.renderWidth).arg(s.renderHeight).arg(QString::fromStdString(s.decoder));
+    if (m_playback.isPlaying()) text += QStringLiteral(" · %1 fps").arg(s.previewFps, 0, 'f', 1);
+    if (s.droppedFrames) text += QStringLiteral(" · %1 dropped").arg(s.droppedFrames);
+    m_statsLabel->setText(text);
 }
 
 }  // namespace lf::ui

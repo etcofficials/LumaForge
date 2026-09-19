@@ -8,6 +8,8 @@ add_subdirectory(commands)
 add_subdirectory(media)
 add_subdirectory(project)
 add_subdirectory(rendering)
+add_subdirectory(audio)
+add_subdirectory(playback)
 
 add_subdirectory(ui)
 add_subdirectory(app)

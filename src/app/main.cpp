@@ -77,16 +77,24 @@ int main(int argc, char* argv[]) {
         LF_LOG_WARN("hw", "no D3D11 device: {}", created.error().fullText());
     }
 
+    int rc = 0;
+    {   // Scoped so the window (and everything it owns) is gone before the GPU device.
     lf::ui::MainWindow window(gpu, logSink);
     window.show();
+    // Command line: media files are imported; --source <file> also opens it in
+    // the preview (--autoplay starts playback); --diagnostics[=tab] opens Diagnostics.
     QStringList filesToImport;
+    QString sourceFile;
     const QStringList args = app.arguments();
+    const bool autoplay = args.contains(QStringLiteral("--autoplay"));
     for (int i = 1; i < args.size(); ++i) {
         const QString& arg = args[i];
         if (arg.startsWith(QStringLiteral("--diagnostics"))) window.openDiagnostics(arg.section(QLatin1Char('='), 1));
+        else if (arg == QStringLiteral("--source") && i + 1 < args.size()) sourceFile = args[++i];
         else if (!arg.startsWith(QStringLiteral("--")) && QFileInfo::exists(arg)) filesToImport << arg;
     }
     if (!filesToImport.isEmpty()) window.importFiles(filesToImport);
+    if (!sourceFile.isEmpty()) window.openSourceFile(sourceFile, autoplay);
 
     // Full hardware detection (decoder profiles, encoder probes) runs off the
     // UI thread; encoder probing loads vendor DLLs and can take a while.
@@ -98,8 +106,11 @@ int main(int argc, char* argv[]) {
     detector->setObjectName(QStringLiteral("hw-detect"));
     detector->start();
 
-    const int rc = app.exec();
+    rc = app.exec();
     detector->wait();
+    LF_LOG_INFO("app", "event loop finished ({}), tearing down", rc);
+    }
+    gpu.reset();
     LF_LOG_INFO("app", "exit {}", rc);
     lf::log::Logger::instance().flush();
     return rc;

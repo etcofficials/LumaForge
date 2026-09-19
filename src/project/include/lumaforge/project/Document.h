@@ -33,6 +33,7 @@ public:
     using Listener = std::function<void(const Change&)>;
 
     Document();
+    ~Document();
 
     [[nodiscard]] Project& project() noexcept { return m_project; }
     [[nodiscard]] const Project& project() const noexcept { return m_project; }

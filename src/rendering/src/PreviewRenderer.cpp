@@ -107,7 +107,12 @@ Status PreviewRenderer::render(const PreviewScene& scene) {
         }
     }
 
-    HRESULT hr = m_swapChain->Present(0, 0);
+    return present(false);
+}
+
+Status PreviewRenderer::present(bool vsync) {
+    auto lock = m_device->contextLock();
+    HRESULT hr = m_swapChain->Present(vsync ? 1 : 0, 0);
     if (FAILED(hr)) return dxError("Present", hr);
     ++m_presented;
     return Status::success();

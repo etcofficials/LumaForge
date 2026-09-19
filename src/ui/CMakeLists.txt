@@ -18,13 +18,14 @@ qt_add_library(lf_ui STATIC
     media/MediaTileDelegate.h media/MediaTileDelegate.cpp
     media/ThumbnailService.h media/ThumbnailService.cpp
     media/ImportController.h media/ImportController.cpp
+    playback/PlaybackController.h playback/PlaybackController.cpp
 )
 add_library(lumaforge::ui ALIAS lf_ui)
 target_include_directories(lf_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(lf_ui
     PUBLIC Qt6::Widgets Qt6::Svg
            lumaforge::core lumaforge::commands lumaforge::hardware lumaforge::rendering lumaforge::diagnostics
-           lumaforge::media lumaforge::project)
+           lumaforge::media lumaforge::project lumaforge::playback)
 
 # Theme + icons are compiled into the binary; no loose files to lose at runtime.
 qt_add_resources(lf_ui "lf_ui_resources"
@@ -63,4 +64,6 @@ qt_add_resources(lf_ui "lf_ui_resources"
         "${CMAKE_SOURCE_DIR}/resources/icons/view-list.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/sort.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/add-to-timeline.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/audio.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/audio-muted.svg"
 )

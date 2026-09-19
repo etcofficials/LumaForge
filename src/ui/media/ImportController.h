@@ -14,6 +14,7 @@ class ImportController : public QObject {
     Q_OBJECT
 public:
     explicit ImportController(project::Document& doc, QObject* parent = nullptr);
+    ~ImportController() override;
 
     // Native file dialog, then importFiles().
     void importWithDialog(QWidget* parent);

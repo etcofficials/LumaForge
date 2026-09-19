@@ -68,8 +68,28 @@ G:\LumaForge\tools\fetch-qt.ps1
 G:\LumaForge\tools\diagnose-toolchain.ps1
 ```
 
+`fetch-portable-msvc.py` accepts `--skip-msvc` / `--skip-sdk` to re-extract only one half.
+Before re-extracting MSVC make sure no `mspdbsrv.exe` (the PDB server the compiler leaves
+running) is alive, or the old toolset directory cannot be removed.
+
 The canonical `setup-msvc.ps1` is `tools/setup-msvc.ps1` (used by `setup-environment.ps1`).
 A copy is kept at `G:\DevTools\setup-msvc.ps1` for use without the repository.
+
+### Optional: Debugging Tools for Windows (cdb)
+
+```powershell
+G:\LumaForge\tools\fetch-debuggers.ps1     # -> G:\DevTools\WindowsSDK\Debuggers\x64\cdb.exe
+```
+
+The debuggers are not in the VS manifest, so this uses `winsdksetup.exe /layout` (download
+only) plus `msiexec /a` (admin extraction). Nothing is installed or registered. To capture the
+stack of a crash that the in-process crash handler cannot catch (e.g. during static
+destruction), put commands in a file and run the app under cdb:
+
+```powershell
+# cmds.txt:  .sympath G:\LumaForge\build\debug\bin   /   g   /   kv 50   /   q   (one per line)
+G:\DevTools\WindowsSDK\Debuggers\x64\cdb.exe -g -G -o -cf cmds.txt G:\LumaForge\build\debug\bin\LumaForge.exe
+```
 
 ## Application runtime files (development builds)
 

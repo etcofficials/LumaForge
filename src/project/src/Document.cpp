@@ -5,6 +5,7 @@
 namespace lf::project {
 
 Document::Document() = default;
+Document::~Document() = default;
 
 int Document::addListener(Listener listener) {
     const int token = m_nextToken++;

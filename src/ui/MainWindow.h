@@ -1,15 +1,12 @@
 #pragma once
 
-#include "lumaforge/commands/UndoStack.h"
 #include "lumaforge/core/Log.h"
 #include "lumaforge/core/Time.h"
 #include "lumaforge/hardware/HwCapabilities.h"
 #include "lumaforge/project/Document.h"
 
-#include <QElapsedTimer>
 #include <QMainWindow>
 #include <QPointer>
-#include <QTimer>
 
 #include <memory>
 #include <optional>
@@ -26,6 +23,7 @@ class DiagnosticsDialog;
 class ImportController;
 class InspectorPanel;
 class MediaPanel;
+class PlaybackController;
 class PreviewPanel;
 class TimelinePanel;
 
@@ -40,6 +38,8 @@ public:
     void openDiagnostics(const QString& tab = {});
     // Imports media files (e.g. passed on the command line or via 'Open with').
     void importFiles(const QStringList& paths);
+    // Imports one file and opens it in the source preview (optionally playing).
+    void openSourceFile(const QString& path, bool autoplay);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -54,16 +54,8 @@ private:
     void connectActions();
     void updateUndoActions();
     void updateWindowTitle();
-    void updateTimeReadouts();
     void showDiagnostics(const QString& tab = {});
     void notYetAvailable(const QString& feature);
-
-    // Placeholder transport clock until the playback engine exists: advances
-    // the playhead in real time so transport, timecode and repaint cost can
-    // be exercised today.
-    void togglePlayback();
-    void stopPlayback();
-    void onPlaybackTick();
 
     std::shared_ptr<hw::GpuDevice> m_gpu;
     std::shared_ptr<log::RingBufferSink> m_logSink;
@@ -72,6 +64,7 @@ private:
     ActionRegistry* m_actions;
     std::unique_ptr<project::Document> m_document;
     ImportController* m_importer = nullptr;
+    PlaybackController* m_playback = nullptr;
 
     QSplitter* m_mainSplitter = nullptr;
     QSplitter* m_topSplitter = nullptr;
@@ -84,17 +77,6 @@ private:
     QLabel* m_statusHardware = nullptr;
     QLabel* m_statusPreview = nullptr;
     QLabel* m_statusFps = nullptr;
-
-    // Project placeholders (project module lands next milestone)
-    QString m_projectName;
-    Rational m_projectFps = fps::f30;
-    int m_projectWidth = 1920;
-    int m_projectHeight = 1080;
-
-    bool m_playing = false;
-    TimePoint m_playbackOrigin;
-    QElapsedTimer m_playbackClock;
-    QTimer m_playbackTimer;
 };
 
 }  // namespace lf::ui
