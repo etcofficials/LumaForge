@@ -60,22 +60,37 @@ Result<std::shared_ptr<GpuDevice>> GpuDevice::create(const CreateOptions& option
     const bool tryDebug = false;
 #endif
 
-    auto tryCreate = [&](UINT createFlags) {
-        return D3D11CreateDevice(adapter.Get(), adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr,
+    auto tryCreate = [&](D3D_DRIVER_TYPE type, UINT createFlags) {
+        gpu->m_device.Reset();
+        gpu->m_context.Reset();
+        return D3D11CreateDevice(type == D3D_DRIVER_TYPE_UNKNOWN ? adapter.Get() : nullptr, type, nullptr,
                                  createFlags, kFeatureLevels.data(), static_cast<UINT>(kFeatureLevels.size()),
                                  D3D11_SDK_VERSION, &gpu->m_device, &gpu->m_featureLevel, &gpu->m_context);
     };
 
     hr = E_FAIL;
-    if (tryDebug) {
-        hr = tryCreate(flags | D3D11_CREATE_DEVICE_DEBUG);
-        gpu->m_debugLayer = SUCCEEDED(hr);
+    if (!options.forceWarp) {
+        const D3D_DRIVER_TYPE type = adapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE;
+        if (tryDebug) {
+            hr = tryCreate(type, flags | D3D11_CREATE_DEVICE_DEBUG);
+            gpu->m_debugLayer = SUCCEEDED(hr);
+        }
+        if (FAILED(hr)) hr = tryCreate(type, flags);
+        if (FAILED(hr)) {
+            // VIDEO_SUPPORT can be refused by some drivers; a device without it is still useful for rendering.
+            flags &= ~D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
+            hr = tryCreate(type, flags);
+        }
+        if (FAILED(hr)) LF_LOG_WARN(kLog, "hardware D3D11 device unavailable ({}); trying WARP", hresultToString(hr));
     }
-    if (FAILED(hr)) hr = tryCreate(flags);
-    if (FAILED(hr)) {
-        // VIDEO_SUPPORT can be refused by some drivers; a device without it is still useful for rendering.
+    if (FAILED(hr) && options.allowWarp) {
+        // WARP: Microsoft's software rasteriser, part of Windows. Every shader
+        // LumaForge uses runs on it unchanged, so the CPU fallback is the same
+        // compositor, only slower. No video decode acceleration.
+        adapter.Reset();
         flags &= ~D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
-        hr = tryCreate(flags);
+        hr = tryCreate(D3D_DRIVER_TYPE_WARP, flags);
+        gpu->m_isWarp = SUCCEEDED(hr);
     }
     if (FAILED(hr)) {
         return Error{"Could not create a Direct3D 11 device. The preview will use software rendering.",
@@ -99,7 +114,7 @@ Result<std::shared_ptr<GpuDevice>> GpuDevice::create(const CreateOptions& option
     // Video device is optional: without it we simply have no D3D11VA decode.
     gpu->m_device.As(&gpu->m_videoDevice);
 
-    LF_LOG_INFO(kLog, "D3D11 device created: feature level {}{}{}", gpu->featureLevelString(),
+    LF_LOG_INFO(kLog, "D3D11 device created: {}feature level {}{}{}", gpu->m_isWarp ? "WARP (software), " : "", gpu->featureLevelString(),
                 gpu->m_videoDevice ? ", video device available" : ", no video device",
                 gpu->m_debugLayer ? ", debug layer" : "");
     return gpu;

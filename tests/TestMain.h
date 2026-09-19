@@ -45,9 +45,33 @@ inline void check(bool ok, const char* expr, const char* file, int line) {
 #define CHECK(expr) ::lftest::check(static_cast<bool>(expr), #expr, __FILE__, __LINE__)
 
 #ifdef LF_TEST_MAIN
-int main() {
+#include <cstring>
+#include <cstdlib>
+#ifdef _MSC_VER
+#include <crtdbg.h>
+#endif
+// Usage: lf_tests [--filter <substring>] [--list]
+int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);   // progress is visible even when piped or killed
+#ifdef _MSC_VER
+    // Debug-CRT assertions must fail the run, never block it behind a dialog.
+    _set_error_mode(_OUT_TO_STDERR);
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
+    const char* filter = nullptr;
+    bool list = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--filter") == 0 && i + 1 < argc) filter = argv[++i];
+        else if (std::strcmp(argv[i], "--list") == 0) list = true;
+    }
     int failedCases = 0;
     for (const auto& c : ::lftest::cases()) {
+        if (filter && std::strstr(c.name, filter) == nullptr) continue;
+        if (list) { std::printf("%s\n", c.name); continue; }
+        std::printf("[ .. ] %s\r", c.name);
         const int before = ::lftest::failures();
         c.body();
         const bool ok = ::lftest::failures() == before;

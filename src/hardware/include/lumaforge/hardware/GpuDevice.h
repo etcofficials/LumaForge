@@ -26,6 +26,8 @@ public:
     struct CreateOptions {
         int adapterIndex = -1;         // -1 = default adapter
         bool allowDebugLayer = false;  // tries D3D11_CREATE_DEVICE_DEBUG, falls back silently
+        bool allowWarp = true;         // fall back to the WARP software rasteriser
+        bool forceWarp = false;        // skip hardware entirely (testing / --software-preview)
     };
 
     static Result<std::shared_ptr<GpuDevice>> create(const CreateOptions& options = {});
@@ -43,9 +45,14 @@ public:
     [[nodiscard]] D3D_FEATURE_LEVEL featureLevel() const noexcept { return m_featureLevel; }
     [[nodiscard]] std::string featureLevelString() const;
     [[nodiscard]] bool debugLayerActive() const noexcept { return m_debugLayer; }
+    [[nodiscard]] bool isWarp() const noexcept { return m_isWarp; }
+    [[nodiscard]] std::string description() const { return (m_isWarp ? std::string("WARP software, FL ") : std::string("Direct3D 11, FL ")) + featureLevelString(); }
 
     // Serialises immediate-context use between threads.
     [[nodiscard]] std::unique_lock<std::recursive_mutex> contextLock() { return std::unique_lock(m_contextMutex); }
+    // Plain lock/unlock for C callbacks (FFmpeg's d3d11va hwcontext).
+    void lockContext() { m_contextMutex.lock(); }
+    void unlockContext() { m_contextMutex.unlock(); }
 
     // True when the device has been removed/reset; owner should recreate.
     [[nodiscard]] bool isLost() const;
@@ -61,6 +68,7 @@ private:
     ComPtr<ID3D11VideoDevice> m_videoDevice;
     D3D_FEATURE_LEVEL m_featureLevel = D3D_FEATURE_LEVEL_9_1;
     bool m_debugLayer = false;
+    bool m_isWarp = false;
     std::recursive_mutex m_contextMutex;
 };
 

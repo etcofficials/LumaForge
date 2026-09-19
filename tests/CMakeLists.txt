@@ -8,7 +8,8 @@ add_executable(lf_tests
     test_frame_layout.cpp
     test_media.cpp
     test_project.cpp
+    test_decoders.cpp
 )
-target_link_libraries(lf_tests PRIVATE lumaforge::core lumaforge::commands lumaforge::rendering lumaforge::media lumaforge::project)
+target_link_libraries(lf_tests PRIVATE lumaforge::core lumaforge::commands lumaforge::rendering lumaforge::media lumaforge::project lumaforge::hardware)
 target_compile_definitions(lf_tests PRIVATE LF_TEST_MEDIA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")
 add_test(NAME lf_tests COMMAND lf_tests)
