@@ -1,0 +1,74 @@
+#pragma once
+
+#include "lumaforge/project/Document.h"
+#include "lumaforge/project/TimelineCommands.h"
+
+#include <optional>
+#include <vector>
+
+// Pure timeline editing logic. Every function computes a SequenceEdit from
+// the current project state without mutating it; the caller wraps the edit
+// in a SequenceEditCommand. Keeping this Qt-free and side-effect-free is what
+// makes trimming, overwriting and rippling unit-testable with exact numbers.
+namespace lf::project::ops {
+
+inline constexpr Duration kDefaultImageDuration = Duration{kFlicksPerSecond * 5};
+inline constexpr Duration kDefaultTextDuration = Duration{kFlicksPerSecond * 5};
+
+// Where the media should land when added to the timeline.
+struct Placement {
+    TrackId videoTrack = TrackId::Invalid;   // Invalid = don't create a visual clip
+    TrackId audioTrack = TrackId::Invalid;   // Invalid = don't create an audio clip
+    TimePoint start;
+};
+
+// Clips (video/image + linked audio) for one media item. Ids are allocated
+// from the document; nothing is inserted.
+std::vector<Clip> clipsForMedia(Document& doc, const MediaItem& item, const Placement& placement, Duration imageDuration = kDefaultImageDuration);
+
+// Default landing spot: V1/A1 at `at` (or the sequence end when at < 0).
+Placement defaultPlacement(const Project& project, const MediaItem& item, TimePoint at);
+
+// Makes room for `range` on `track`: clips overlapping it are trimmed, split
+// or removed (overwrite edit). Clips in `ignore` are left alone (the clips
+// being moved). New right-hand pieces get ids from `doc`.
+void overwriteRange(Document& doc, TrackId track, TimeRange range, const std::vector<ClipId>& ignore, SequenceEdit& edit);
+
+// Inserts clips with overwrite semantics at their own start/track.
+SequenceEdit insertClips(Document& doc, std::vector<Clip> clips);
+
+// Moves clips by a time delta and/or to other tracks (trackDelta in display
+// rows; a clip only moves onto a track of its own kind). Overwrites at the
+// destination. Returns nullopt when the move is impossible (negative start,
+// no compatible track).
+std::optional<SequenceEdit> moveClips(Document& doc, const std::vector<ClipId>& ids, Duration delta, int trackDelta);
+
+enum class Edge { Start, End };
+// Trims one edge of a clip to `time` (sequence time). Clamped so the clip
+// keeps at least one frame and never runs past the media. Linked clips are
+// trimmed together when `withLinked` is set. Overwrites clips it grows into.
+SequenceEdit trimClip(Document& doc, ClipId id, Edge edge, TimePoint time, bool withLinked = true);
+
+// Splits the clip (and its linked partner) at `time`. Empty when time is not strictly inside.
+SequenceEdit splitClips(Document& doc, const std::vector<ClipId>& ids, TimePoint time);
+// Splits every clip under the playhead on unlocked tracks.
+SequenceEdit splitAt(Document& doc, TimePoint time);
+
+// Removes clips; with ripple, later clips on every track shift left to close the gap.
+SequenceEdit removeClips(Document& doc, const std::vector<ClipId>& ids, bool ripple);
+
+// Clip ids plus their linked partners (deduplicated).
+std::vector<ClipId> withLinked(const Sequence& seq, const std::vector<ClipId>& ids);
+
+// Snapping: interesting times = clip edges (excluding `ignore`), the playhead and zero.
+std::vector<TimePoint> snapTargets(const Sequence& seq, const std::vector<ClipId>& ignore, TimePoint playhead);
+// Nearest target within tolerance, else nullopt.
+std::optional<TimePoint> snap(TimePoint t, const std::vector<TimePoint>& targets, Duration tolerance);
+
+// Media duration in sequence time for a clip's source (images/text: unbounded).
+std::optional<Duration> mediaDuration(const Project& project, const Clip& clip);
+
+// The sequence's clips as they will be once `edit` executes (for previews).
+std::vector<Clip> applied(const Sequence& seq, const SequenceEdit& edit);
+
+}  // namespace lf::project::ops

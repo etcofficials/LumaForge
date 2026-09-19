@@ -4,7 +4,7 @@
 
 namespace lf::project {
 
-Document::Document() = default;
+Document::Document() { noteIdsInUse(); }
 Document::~Document() = default;
 
 int Document::addListener(Listener listener) {
@@ -29,6 +29,8 @@ TrackId Document::allocateTrackId() { return static_cast<TrackId>(m_nextTrackId+
 
 void Document::noteIdsInUse() {
     for (const auto& m : m_project.media) m_nextMediaId = std::max(m_nextMediaId, raw(m.id) + 1);
+    for (const auto& t : m_project.sequence.tracks) m_nextTrackId = std::max(m_nextTrackId, raw(t.id) + 1);
+    for (const auto& c : m_project.sequence.clips) m_nextClipId = std::max(m_nextClipId, raw(c.id) + 1);
 }
 
 void Document::reset(Project project) {

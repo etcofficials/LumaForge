@@ -107,9 +107,19 @@ private:
     bool m_stop = false;
     bool m_redraw = false;
     bool m_surfaceDirty = false;
+    bool m_retryRender = false;     // last paused frame was incomplete; poll the readers
+    int m_retryCount = 0;
+    static constexpr int kMaxRetries = 250;   // ~3 s at 12 ms
     int m_surfaceW = 0, m_surfaceH = 0;
     std::shared_ptr<const Program> m_program;
-    std::unordered_map<std::string, std::unique_ptr<VideoReader>> m_readers;
+    // One reader per (media, clip): two clips of the same file may be visible
+    // at once, and a reader that stays on its clip never has to seek far.
+    struct ReaderEntry {
+        std::string path;
+        std::unique_ptr<VideoReader> reader;
+        std::chrono::steady_clock::time_point lastUsed;
+    };
+    std::unordered_map<std::string, ReaderEntry> m_readers;
     std::vector<VideoLayerRequest> m_layerRequests;
     std::vector<render::Layer> m_layers;
 

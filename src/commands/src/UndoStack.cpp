@@ -43,8 +43,9 @@ void UndoStack::push(CommandPtr command) {
 
     truncateRedoBranch();
 
-    // Coalesce with the previous command when both agree.
-    if (m_index > 0) {
+    // Coalesce with the previous command when both agree - unless that command
+    // is the saved state, which must stay distinguishable from the new edit.
+    if (m_index > 0 && m_cleanIndex != static_cast<long long>(m_index)) {
         auto& prev = m_commands[m_index - 1];
         const int id = command->mergeId();
         if (id != -1 && id == prev->mergeId() && prev->mergeWith(*command)) {

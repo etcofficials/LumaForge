@@ -20,7 +20,7 @@ enum class ActionId {
     // Media
     MediaImport,
     // Edit
-    EditUndo, EditRedo, ClipSplit, ClipDelete, ClipSelectAll,
+    EditUndo, EditRedo, ClipSplit, ClipDelete, ClipRippleDelete, ClipSelectAll,
     // Playback
     PlayPause, PlayStop, StepBack, StepForward, GoToStart, GoToEnd,
     // Timeline
@@ -43,6 +43,14 @@ public:
 
     // Shortcut display text ("Ctrl+S") for tooltips/hints.
     [[nodiscard]] QString shortcutText(ActionId id) const;
+
+    // True for widgets where plain keys mean typing (line edits, spin boxes...).
+    static bool isTextInput(const QWidget* w);
+
+protected:
+    // Application-wide: single-key shortcuts (Space, S, Delete, arrows...) never
+    // steal keystrokes from a focused text field.
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     QHash<ActionId, QAction*> m_actions;

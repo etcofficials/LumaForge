@@ -2,6 +2,16 @@
 
 #include "ui/Icons.h"
 
+#include <QAbstractSpinBox>
+#include <QApplication>
+#include <QComboBox>
+#include <QEvent>
+#include <QKeyEvent>
+#include <QKeySequenceEdit>
+#include <QLineEdit>
+#include <QPlainTextEdit>
+#include <QTextEdit>
+
 namespace lf::ui {
 
 namespace {
@@ -50,6 +60,7 @@ const ActionDef kActions[] = {
     {ActionId::EditRedo,        "editRedo",        "&Redo",               "redo",   Shortcut{Qt::CTRL | Qt::SHIFT | Qt::Key_Z}, "Redo the last undone edit", false, false},
     {ActionId::ClipSplit,       "clipSplit",       "&Split at Playhead",  "split",  Shortcut{Qt::Key_S}, "Split the clip under the playhead", false, false},
     {ActionId::ClipDelete,      "clipDelete",      "&Delete",             "delete", QKeySequence::Delete, "Delete the selected clips", false, false},
+    {ActionId::ClipRippleDelete,"clipRippleDelete","&Ripple Delete",      nullptr,  Shortcut{Qt::SHIFT | Qt::Key_Delete}, "Delete the selected clips and close the gap", false, false},
     {ActionId::ClipSelectAll,   "clipSelectAll",   "Select &All",         nullptr,  QKeySequence::SelectAll, "Select all clips", false, false},
 
     {ActionId::PlayPause,       "playPause",       "&Play/Pause",         "play",   Shortcut{Qt::Key_Space}, "Play or pause"},
@@ -86,6 +97,32 @@ ActionRegistry::ActionRegistry(QObject* parent) : QObject(parent) {
         a->setShortcutContext(Qt::WindowShortcut);
         m_actions.insert(def.id, a);
     }
+    qApp->installEventFilter(this);
+}
+
+bool ActionRegistry::isTextInput(const QWidget* w) {
+    if (!w) return false;
+    if (qobject_cast<const QLineEdit*>(w) || qobject_cast<const QTextEdit*>(w) || qobject_cast<const QPlainTextEdit*>(w) ||
+        qobject_cast<const QAbstractSpinBox*>(w) || qobject_cast<const QKeySequenceEdit*>(w))
+        return true;
+    if (const auto* combo = qobject_cast<const QComboBox*>(w)) return combo->isEditable();
+    // Editors embedded in item views / spin boxes report through their parent.
+    if (const QWidget* parent = w->parentWidget()) {
+        if (qobject_cast<const QAbstractSpinBox*>(parent) || qobject_cast<const QComboBox*>(parent)) return true;
+    }
+    return false;
+}
+
+bool ActionRegistry::eventFilter(QObject* watched, QEvent* event) {
+    if (event->type() == QEvent::ShortcutOverride) {
+        auto* ke = static_cast<QKeyEvent*>(event);
+        const bool plainKey = !(ke->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier));
+        if (plainKey && isTextInput(qobject_cast<QWidget*>(watched))) {
+            event->accept();   // the widget gets the key press; the shortcut does not fire
+            return false;
+        }
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 QAction* ActionRegistry::action(ActionId id) const { return m_actions.value(id, nullptr); }

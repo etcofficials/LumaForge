@@ -3,6 +3,7 @@
 #include "lumaforge/core/Log.h"
 #include "lumaforge/core/Time.h"
 #include "lumaforge/hardware/HwCapabilities.h"
+#include "lumaforge/playback/Program.h"
 #include "lumaforge/project/Document.h"
 
 #include <QMainWindow>
@@ -36,8 +37,9 @@ public:
     // Called once background hardware detection completes.
     void setHardwareReport(hw::HwReport report);
     void openDiagnostics(const QString& tab = {});
-    // Imports media files (e.g. passed on the command line or via 'Open with').
-    void importFiles(const QStringList& paths);
+    // Imports media files (e.g. passed on the command line or via 'Open with');
+    // optionally appends them to the timeline in the given order.
+    void importFiles(const QStringList& paths, bool addToTimeline = false);
     // Imports one file and opens it in the source preview (optionally playing).
     void openSourceFile(const QString& path, bool autoplay);
 
@@ -56,6 +58,11 @@ private:
     void updateWindowTitle();
     void showDiagnostics(const QString& tab = {});
     void notYetAvailable(const QString& feature);
+    void onDocumentChange(const project::Change& change);
+    void scheduleSequenceRefresh();
+    void refreshSequenceProgram();
+    // Switches the preview to the timeline (no-op when already there).
+    void showSequenceInPreview(TimePoint at);
 
     std::shared_ptr<hw::GpuDevice> m_gpu;
     std::shared_ptr<log::RingBufferSink> m_logSink;
@@ -63,8 +70,11 @@ private:
 
     ActionRegistry* m_actions;
     std::unique_ptr<project::Document> m_document;
+    int m_documentListener = 0;
     ImportController* m_importer = nullptr;
     PlaybackController* m_playback = nullptr;
+    std::shared_ptr<const playback::Program> m_sequenceProgram;
+    bool m_sequenceRefreshPending = false;
 
     QSplitter* m_mainSplitter = nullptr;
     QSplitter* m_topSplitter = nullptr;

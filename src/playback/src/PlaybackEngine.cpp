@@ -112,6 +112,7 @@ void PlaybackEngine::resizeSurface(int width, int height) {
 void PlaybackEngine::requestRedraw() {
     std::lock_guard lock(m_mutex);
     m_redraw = true;
+    m_retryCount = 0;
     wake();
 }
 
@@ -130,10 +131,14 @@ void PlaybackEngine::setProgram(std::shared_ptr<const Program> program, TimePoin
             m_playWall = Clock::now();
         }
         m_redraw = true;
+        m_retryCount = 0;
         m_stats.decoder = "-";
     }
     m_mixer->setProgram(m_program);
     m_mixer->setTime(position());
+    LF_LOG_DEBUG(kLog, "program set: {} ({:.3f} s, {}x{}), position {:.3f} s", m_program ? "yes" : "none",
+                 m_program ? m_program->duration().toSeconds() : 0.0, m_program ? m_program->frameWidth() : 0,
+                 m_program ? m_program->frameHeight() : 0, position().toSeconds());
     wake();
 }
 
@@ -158,6 +163,7 @@ void PlaybackEngine::play() {
     }
     m_mixer->setTime(position());
     m_mixer->setPlaying(true);
+    LF_LOG_DEBUG(kLog, "play from {:.3f} s", position().toSeconds());
     if (m_callbacks.playingChanged) m_callbacks.playingChanged(true);
     wake();
 }
@@ -169,8 +175,10 @@ void PlaybackEngine::pause() {
         was = m_playing.exchange(false);
         if (was) m_position = std::clamp<Ticks>(clockNow().ticks, 0, m_program ? m_program->duration().ticks : 0);
         m_redraw = true;
+        m_retryCount = 0;
     }
     m_mixer->setPlaying(false);
+    if (was) LF_LOG_DEBUG(kLog, "pause at {:.3f} s", position().toSeconds());
     if (was && m_callbacks.playingChanged) m_callbacks.playingChanged(false);
     notifyPosition(position(), true);
     wake();
@@ -202,6 +210,7 @@ void PlaybackEngine::seek(TimePoint t, bool scrubbing) {
             m_playWall = Clock::now();
         }
         m_redraw = true;
+        m_retryCount = 0;
     }
     m_mixer->setTime(position());
     notifyPosition(position(), true);
@@ -247,24 +256,41 @@ void PlaybackEngine::notifyPosition(TimePoint t, bool force) {
 // ---------------------------------------------------------------- rendering
 
 VideoReader& PlaybackEngine::readerFor(const VideoLayerRequest& req) {
-    auto it = m_readers.find(req.path);
+    const std::string key = req.path + '#' + std::to_string(req.layerKey);
+    auto it = m_readers.find(key);
     if (it == m_readers.end()) {
         VideoReader::Options o;
         o.gpu = m_gpu;
         o.pool = m_compositor->texturePoolPtr();
         o.allowHardware = m_allowHardware;
         o.isImage = req.isImage;
-        it = m_readers.emplace(req.path, std::make_unique<VideoReader>(req.path, o)).first;
+        ReaderEntry e;
+        e.path = req.path;
+        e.reader = std::make_unique<VideoReader>(req.path, o);
+        it = m_readers.emplace(key, std::move(e)).first;
     }
-    return *it->second;
+    it->second.lastUsed = Clock::now();
+    return *it->second.reader;
 }
 
 void PlaybackEngine::pruneReaders() {
     if (!m_program) { m_readers.clear(); return; }
+    // Drop readers whose media left the program, and readers idle for a while
+    // (each one holds a decoder, a prefetch queue and GPU textures). A short
+    // grace period keeps scrubbing back and forth across a cut cheap.
+    constexpr auto kIdle = std::chrono::seconds(4);
+    constexpr std::size_t kMaxReaders = 8;
     const auto paths = m_program->mediaPaths();
+    const auto now = Clock::now();
     for (auto it = m_readers.begin(); it != m_readers.end();) {
-        if (std::find(paths.begin(), paths.end(), it->first) == paths.end()) it = m_readers.erase(it);
+        const bool gone = std::find(paths.begin(), paths.end(), it->second.path) == paths.end();
+        const bool idle = now - it->second.lastUsed > kIdle;
+        if (gone || (idle && m_readers.size() > 2)) it = m_readers.erase(it);
         else ++it;
+    }
+    while (m_readers.size() > kMaxReaders) {
+        auto oldest = std::min_element(m_readers.begin(), m_readers.end(), [](const auto& a, const auto& b) { return a.second.lastUsed < b.second.lastUsed; });
+        m_readers.erase(oldest);
     }
 }
 
@@ -315,6 +341,7 @@ void PlaybackEngine::renderOnce(TimePoint t, bool vsync) {
     bool starved = false;
     std::string decoderName = "-";
     for (const auto& req : m_layerRequests) {
+        if (req.path.empty()) continue;   // generated layers (text) arrive with the text rasteriser
         VideoReader& reader = readerFor(req);
         bool exact = false;
         auto tex = reader.frameAt(req.sourceTime, exact);
@@ -333,7 +360,7 @@ void PlaybackEngine::renderOnce(TimePoint t, bool vsync) {
     }
     // Look-ahead hint: readers decode towards where playback is going.
     if (m_playing.load()) {
-        for (const auto& req : m_layerRequests) readerFor(req).hint(req.sourceTime);
+        for (const auto& req : m_layerRequests) if (!req.path.empty()) readerFor(req).hint(req.sourceTime);
     }
 
     if (auto s = m_compositor->compose(*m_target, fw, fh, m_layers, render::Rgba{0, 0, 0, 1}); !s) {
@@ -356,6 +383,10 @@ void PlaybackEngine::renderOnce(TimePoint t, bool vsync) {
     m_stats.decoder = decoderName;
     m_stats.renderWidth = m_target->width();
     m_stats.renderHeight = m_target->height();
+    {
+        std::lock_guard lock(m_mutex);
+        m_retryRender = starved;
+    }
 }
 
 void PlaybackEngine::threadMain() {
@@ -378,8 +409,16 @@ void PlaybackEngine::threadMain() {
                 const Ticks nextFrame = ((now / fd) + 1) * fd;
                 const auto waitNs = std::chrono::nanoseconds(static_cast<long long>((nextFrame - now) * (1'000'000'000.0 / kFlicksPerSecond)));
                 m_cv.wait_for(lock, waitNs, [&] { return m_stop || m_redraw || m_surfaceDirty; });
+            } else if (m_retryRender && m_retryCount < kMaxRetries) {
+                // Paused, but the last frame was incomplete (a reader was still
+                // decoding towards it): poll briefly until it arrives.
+                m_cv.wait_for(lock, std::chrono::milliseconds(12), [&] { return m_stop || m_redraw || m_surfaceDirty || m_playing.load(); });
+                m_redraw = true;
+                ++m_retryCount;
             } else {
-                m_cv.wait(lock, [&] { return m_stop || m_redraw || m_surfaceDirty; });
+                // play() flips m_playing and wakes us: it must be part of the predicate,
+                // otherwise a wake-up with nothing else pending goes straight back to sleep.
+                m_cv.wait(lock, [&] { return m_stop || m_redraw || m_surfaceDirty || m_playing.load(); });
             }
             if (m_stop) break;
             redraw = m_redraw;
@@ -399,7 +438,9 @@ void PlaybackEngine::threadMain() {
                     playing = false;
                     lock.unlock();
                     m_mixer->setPlaying(false);
+                    LF_LOG_DEBUG(kLog, "reached end at {:.3f} s", TimePoint{dur}.toSeconds());
                     if (m_callbacks.playingChanged) m_callbacks.playingChanged(false);
+                    notifyPosition(TimePoint{dur}, true);
                     lock.lock();
                     redraw = true;
                 } else {

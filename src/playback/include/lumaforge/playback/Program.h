@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,7 @@ struct VideoLayerRequest {
     ColorAdjust color;
     EffectParams effects;
     bool fitToFrame = true;
+    std::optional<TextParams> text;   // generated text layer (path is empty)
 };
 
 // What to mix for one audio-bearing clip at a given program time.

@@ -83,17 +83,19 @@ int main(int argc, char* argv[]) {
     window.show();
     // Command line: media files are imported; --source <file> also opens it in
     // the preview (--autoplay starts playback); --diagnostics[=tab] opens Diagnostics.
+    // --timeline also appends the imported files to the sequence, in order.
     QStringList filesToImport;
     QString sourceFile;
     const QStringList args = app.arguments();
     const bool autoplay = args.contains(QStringLiteral("--autoplay"));
+    const bool toTimeline = args.contains(QStringLiteral("--timeline"));
     for (int i = 1; i < args.size(); ++i) {
         const QString& arg = args[i];
         if (arg.startsWith(QStringLiteral("--diagnostics"))) window.openDiagnostics(arg.section(QLatin1Char('='), 1));
         else if (arg == QStringLiteral("--source") && i + 1 < args.size()) sourceFile = args[++i];
         else if (!arg.startsWith(QStringLiteral("--")) && QFileInfo::exists(arg)) filesToImport << arg;
     }
-    if (!filesToImport.isEmpty()) window.importFiles(filesToImport);
+    if (!filesToImport.isEmpty()) window.importFiles(filesToImport, toTimeline);
     if (!sourceFile.isEmpty()) window.openSourceFile(sourceFile, autoplay);
 
     // Full hardware detection (decoder profiles, encoder probes) runs off the

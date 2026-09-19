@@ -4,7 +4,11 @@
 #include "lumaforge/hardware/GpuDevice.h"
 #include "lumaforge/media/MediaProbe.h"
 #include "lumaforge/playback/PlaybackEngine.h"
+#include "lumaforge/playback/SequenceProgram.h"
 #include "lumaforge/playback/SourceProgram.h"
+#include "lumaforge/project/MediaCommands.h"
+#include "lumaforge/project/TimelineCommands.h"
+#include "lumaforge/project/TimelineOps.h"
 
 #include <chrono>
 #include <cstdio>
@@ -52,4 +56,34 @@ TEST_CASE("playback engine: lifecycle without a surface (WARP)") {
     CHECK((*engine)->position().ticks == timeOfFrame(31, fps::f30).ticks);
     engine->reset();
     std::printf("     (engine destroyed cleanly)\n");
+}
+
+TEST_CASE("playback engine: sequence program plays and advances (WARP)") {
+    auto gpu = hw::GpuDevice::create({.forceWarp = true});
+    CHECK(gpu.ok());
+    if (!gpu) return;
+    auto engine = playback::PlaybackEngine::create(*gpu, false);
+    CHECK(engine.ok());
+    if (!engine) return;
+    project::Document doc;
+    auto info = media::MediaProbe::probe(mediaPath("countdown_720p30.mp4"));
+    CHECK(info.ok());
+    if (!info) return;
+    project::MediaItem item;
+    item.id = doc.allocateMediaId();
+    item.path = info->path;
+    item.displayName = "countdown";
+    item.info = *info;
+    doc.push(std::make_unique<project::ImportMediaCommand>(doc, std::vector<project::MediaItem>{item}));
+    auto clips = project::ops::clipsForMedia(doc, item, project::ops::defaultPlacement(doc.project(), item, TimePoint::zero()));
+    doc.push(std::make_unique<project::SequenceEditCommand>(doc, "Add", project::ops::insertClips(doc, clips)));
+    auto program = std::make_shared<playback::SequenceProgram>(doc.project());
+    CHECK(program->duration() == info->duration);
+    (*engine)->setProgram(program, TimePoint::zero());
+    (*engine)->play();
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    CHECK((*engine)->isPlaying());
+    CHECK((*engine)->position().toSeconds() > 0.2);
+    (*engine)->pause();
+    engine->reset();
 }

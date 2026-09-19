@@ -2,6 +2,7 @@
 
 #include "lumaforge/core/Rational.h"
 #include "lumaforge/project/MediaItem.h"
+#include "lumaforge/project/Sequence.h"
 
 #include <string>
 #include <vector>
@@ -14,14 +15,15 @@ struct ProjectSettings {
     int height = 1080;
     Rational frameRate = fps::f30;
     int audioSampleRate = 48000;
+    friend bool operator==(const ProjectSettings&, const ProjectSettings&) = default;
 };
 
 // The complete editable state of a project. Plain data: no behaviour, no
-// Qt, trivially serialisable. The Sequence (tracks + clips) is added by the
-// timeline module in the next phase.
+// Qt, trivially serialisable.
 struct Project {
     ProjectSettings settings;
     std::vector<MediaItem> media;
+    Sequence sequence = Sequence::withDefaultTracks();
 
     [[nodiscard]] const MediaItem* findMedia(MediaId id) const noexcept {
         for (const auto& m : media) if (m.id == id) return &m;

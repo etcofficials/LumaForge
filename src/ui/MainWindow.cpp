@@ -4,6 +4,7 @@
 #include "lumaforge/diagnostics/SystemInfo.h"
 #include "lumaforge/hardware/GpuDevice.h"
 #include "lumaforge/hardware/HardwareDetector.h"
+#include "lumaforge/playback/SequenceProgram.h"
 #include "ui/ActionRegistry.h"
 #include "ui/Icons.h"
 #include "ui/Theme.h"
@@ -31,6 +32,7 @@
 #include <QSplitter>
 #include <QStatusBar>
 #include <QStyle>
+#include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -58,6 +60,7 @@ MainWindow::MainWindow(std::shared_ptr<hw::GpuDevice> gpu, std::shared_ptr<log::
     connectActions();
 
     m_document->undoStack().setChangeListener([this] { updateUndoActions(); updateWindowTitle(); });
+    m_documentListener = m_document->addListener([this](const project::Change& c) { onDocumentChange(c); });
     updateUndoActions();
     updateWindowTitle();
 
@@ -91,6 +94,7 @@ MainWindow::~MainWindow() {
     //     never runs once the event loop has finished - take and delete it.
     m_playback->pause();
     m_previewPanel->surface()->setEngine(nullptr, nullptr);
+    m_document->removeListener(m_documentListener);
     delete m_diagnostics.data();
     delete takeCentralWidget();
     m_mediaPanel = nullptr; m_previewPanel = nullptr; m_inspectorPanel = nullptr; m_timelinePanel = nullptr;
@@ -187,7 +191,7 @@ void MainWindow::buildCentralLayout() {
     m_mediaPanel = new MediaPanel(*m_document, *m_actions, *m_importer, this);
     m_previewPanel = new PreviewPanel(*m_actions, *m_playback, this);
     m_inspectorPanel = new InspectorPanel(this);
-    m_timelinePanel = new TimelinePanel(*m_actions, this);
+    m_timelinePanel = new TimelinePanel(*m_document, *m_actions, this);
 
     m_topSplitter = new QSplitter(Qt::Horizontal, this);
     m_topSplitter->setChildrenCollapsible(false);
@@ -212,8 +216,6 @@ void MainWindow::buildCentralLayout() {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_mainSplitter);
     setCentralWidget(central);
-
-    m_timelinePanel->view()->setFrameRate(m_document->project().settings.frameRate);
 }
 
 void MainWindow::buildStatusBar() {
@@ -246,7 +248,35 @@ void MainWindow::connectActions() {
     connect(m_mediaPanel, &MediaPanel::openRequested, this, [this](project::MediaId id) {
         if (const auto* item = m_document->project().findMedia(id)) m_playback->openSource(*item);
     });
-    connect(m_mediaPanel, &MediaPanel::addToTimelineRequested, this, [this](const QList<project::MediaId>&) { notYetAvailable(tr("Add to timeline")); });
+    connect(m_mediaPanel, &MediaPanel::addToTimelineRequested, this, [this](const QList<project::MediaId>& ids) {
+        m_timelinePanel->view()->addMedia(ids, m_timelinePanel->view()->playhead());
+        showSequenceInPreview(m_timelinePanel->view()->playhead());
+    });
+
+    // Timeline <-> preview
+    auto* tl = m_timelinePanel->view();
+    connect(tl, &TimelineView::userSeeked, this, [this](TimePoint t, bool scrubbing) {
+        if (m_playback->mode() != PlaybackController::Mode::Sequence) showSequenceInPreview(t);
+        m_playback->seek(t, scrubbing);
+    });
+    connect(tl, &TimelineView::selectionChanged, this, [this] {
+        if (m_playback->mode() == PlaybackController::Mode::Source && m_timelinePanel->view()->hasSelection()) showSequenceInPreview(m_timelinePanel->view()->playhead());
+    });
+    connect(tl, &TimelineView::externalFilesDropped, this, [this](const QStringList& paths, TimePoint at) {
+        auto conn = std::make_shared<QMetaObject::Connection>();
+        *conn = connect(m_importer, &ImportController::mediaImported, this, [this, at, conn](const QList<project::MediaId>& ids) {
+            QObject::disconnect(*conn);
+            m_timelinePanel->view()->addMedia(ids, at);
+            showSequenceInPreview(at);
+        });
+        m_importer->importFiles(paths, this);
+    });
+    connect(m_playback, &PlaybackController::positionChanged, this, [this](TimePoint t) {
+        if (m_playback->mode() == PlaybackController::Mode::Sequence) m_timelinePanel->view()->setPlayhead(t);
+    });
+    connect(m_playback, &PlaybackController::programChanged, this, [this] {
+        if (m_playback->mode() == PlaybackController::Mode::Sequence) m_timelinePanel->view()->setPlayhead(m_playback->position());
+    });
 
     // Edit
     m_actions->connect(ActionId::EditUndo, this, [this] { m_document->undoStack().undo(); });
@@ -286,6 +316,49 @@ void MainWindow::updateUndoActions() {
     m_actions->setText(ActionId::EditRedo, redoText.isEmpty() ? tr("&Redo") : tr("&Redo %1").arg(redoText));
 }
 
+void MainWindow::onDocumentChange(const project::Change& change) {
+    switch (change.kind) {
+        case project::Change::Kind::Reset:
+        case project::Change::Kind::Settings:
+        case project::Change::Kind::TracksChanged:
+        case project::Change::Kind::ClipsChanged:
+        case project::Change::Kind::MediaRemoved:
+        case project::Change::Kind::MediaChanged:
+            scheduleSequenceRefresh();
+            break;
+        default:
+            break;
+    }
+    if (change.kind == project::Change::Kind::Reset || change.kind == project::Change::Kind::Settings) updateWindowTitle();
+}
+
+void MainWindow::scheduleSequenceRefresh() {
+    // One edit can produce several change notifications; rebuild once per event-loop turn.
+    if (m_sequenceRefreshPending) return;
+    m_sequenceRefreshPending = true;
+    QTimer::singleShot(0, this, [this] {
+        m_sequenceRefreshPending = false;
+        refreshSequenceProgram();
+    });
+}
+
+void MainWindow::refreshSequenceProgram() {
+    const auto& project = m_document->project();
+    m_sequenceProgram = project.sequence.clips.empty() ? nullptr : std::make_shared<playback::SequenceProgram>(project);
+    // Only the timeline view of the preview follows edits; a source preview stays put.
+    if (m_playback->mode() == PlaybackController::Mode::Source) return;
+    const TimePoint keep = m_timelinePanel->view()->playhead();
+    if (m_sequenceProgram) m_playback->setProgram(m_sequenceProgram, PlaybackController::Mode::Sequence, tr("Timeline"), keep);
+    else if (m_playback->mode() == PlaybackController::Mode::Sequence) m_playback->clearProgram();
+}
+
+void MainWindow::showSequenceInPreview(TimePoint at) {
+    if (m_playback->mode() == PlaybackController::Mode::Sequence) return;
+    if (!m_sequenceProgram && !m_document->project().sequence.clips.empty()) m_sequenceProgram = std::make_shared<playback::SequenceProgram>(m_document->project());
+    if (!m_sequenceProgram) { m_playback->clearProgram(); return; }
+    m_playback->setProgram(m_sequenceProgram, PlaybackController::Mode::Sequence, tr("Timeline"), at);
+}
+
 void MainWindow::updateWindowTitle() {
     const QString name = QString::fromStdString(m_document->project().settings.name);
     setWindowTitle(QStringLiteral("%1%2 — LumaForge").arg(name.isEmpty() ? tr("Untitled") : name, m_document->isDirty() ? QStringLiteral("*") : QString()));
@@ -307,7 +380,17 @@ void MainWindow::setHardwareReport(hw::HwReport report) {
 
 void MainWindow::openDiagnostics(const QString& tab) { showDiagnostics(tab); }
 
-void MainWindow::importFiles(const QStringList& paths) { m_importer->importFiles(paths, this); }
+void MainWindow::importFiles(const QStringList& paths, bool addToTimeline) {
+    if (addToTimeline) {
+        auto conn = std::make_shared<QMetaObject::Connection>();
+        *conn = connect(m_importer, &ImportController::mediaImported, this, [this, conn](const QList<project::MediaId>& ids) {
+            QObject::disconnect(*conn);
+            m_timelinePanel->view()->addMedia(ids, TimePoint{-1});
+            showSequenceInPreview(TimePoint::zero());
+        });
+    }
+    m_importer->importFiles(paths, this);
+}
 
 void MainWindow::openSourceFile(const QString& path, bool autoplay) {
     const QString native = QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath());

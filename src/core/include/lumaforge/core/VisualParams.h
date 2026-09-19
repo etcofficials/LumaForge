@@ -4,6 +4,8 @@
 // edits), the project file (what is saved) and the compositor (what is
 // rendered). Deliberately free of any rendering or Qt types.
 
+#include <string>
+
 namespace lf {
 
 struct Transform2D {
@@ -53,6 +55,35 @@ struct EffectParams {
     float blur = 0.0f;        // radius in frame pixels, 0 = off
     float sharpen = 0.0f;     // 0..1
     friend constexpr bool operator==(const EffectParams&, const EffectParams&) = default;
+};
+
+struct ColorRgba {
+    float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
+    friend constexpr bool operator==(const ColorRgba&, const ColorRgba&) = default;
+};
+
+enum class TextAlign { Left, Center, Right };
+
+// A text clip's look. Rendered by the text rasteriser into a layer texture;
+// the Transform2D of the clip then places it like any other layer.
+struct TextParams {
+    std::string text = "Title";
+    std::string fontFamily = "Segoe UI";
+    float fontSize = 72.0f;            // frame pixels (relative to the sequence height)
+    bool bold = true;
+    bool italic = false;
+    ColorRgba color{1.0f, 1.0f, 1.0f, 1.0f};
+    TextAlign align = TextAlign::Center;
+    float outlineWidth = 0.0f;         // frame pixels, 0 = off
+    ColorRgba outlineColor{0.0f, 0.0f, 0.0f, 1.0f};
+    bool shadow = false;
+    float shadowOffsetX = 4.0f, shadowOffsetY = 4.0f;
+    float shadowBlur = 6.0f;
+    ColorRgba shadowColor{0.0f, 0.0f, 0.0f, 0.75f};
+    float backgroundOpacity = 0.0f;    // box behind the text, 0 = none
+    ColorRgba backgroundColor{0.0f, 0.0f, 0.0f, 1.0f};
+    float lineSpacing = 1.0f;
+    friend bool operator==(const TextParams&, const TextParams&) = default;
 };
 
 }  // namespace lf
