@@ -42,6 +42,8 @@ void PreviewWidget::setGpuDevice(std::shared_ptr<hw::GpuDevice> device) {
         setAttribute(Qt::WA_NoSystemBackground, true);
         (void)winId();
         ensureRenderer();
+    } else {
+        LF_LOG_INFO(kLog, "preview surface: Software (no D3D11 device)");
     }
     emit backendChanged();
     update();

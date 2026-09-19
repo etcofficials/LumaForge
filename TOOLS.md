@@ -108,15 +108,26 @@ vector icons), `qttools` (`windeployqt` for packaging). No Qt Quick / Declarativ
 Multimedia (media handling is FFmpeg), no translations. Qt 6.8.3 is the last open-source
 patch release of the 6.8 LTS series.
 
-### Debug builds
-Debug executables need `msvcp140d.dll`, `vcruntime140d.dll` and `ucrtbased.dll`.
-`setup-msvc.ps1` puts `G:\DevTools\MSVC\Redist\...\debug_nonredist\x64\Microsoft.VC144.DebugCRT`
-and `G:\DevTools\MSVC\Redist\debug_ucrt_x64` on the session PATH for this reason.
+### Runtime deployment (the build tree is self-contained)
+`cmake/LumaForgeDeploy.cmake` runs after every link of `LumaForge.exe`:
+- `windeployqt` copies the Qt DLLs and plugins that match the configuration
+  (`Qt6*d.dll` + `platforms/qwindowsd.dll` for Debug, release names otherwise);
+- `cmake/DeployCrt.cmake` copies the MSVC runtime: Debug gets `msvcp140d` / `vcruntime140d` /
+  `vcruntime140_1d` / `ucrtbased` from the toolchain's `debug_nonredist` redist and the SDK;
+  Release gets the `Microsoft.VC14x.CRT` DLLs (app-local);
+- the FFmpeg DLLs are copied from `third_party/ffmpeg/bin`.
+
+Result: `build/<preset>/bin/LumaForge.exe` runs from a plain shell or Explorer with no environment
+setup. Exit code `0xC0000135` (STATUS_DLL_NOT_FOUND) always means a DLL is missing from `bin`;
+Windows records which one in the System event log (Event ID 26, "Application Popup").
+
+`setup-msvc.ps1` still puts the debug CRT directories on the session PATH so ad-hoc test binaries
+built outside CMake run as well.
 
 ### Release runtime
-The machine already has the VC++ 2015–2022 x64 runtime (14.51) in `System32`. For
-distribution, ship the DLLs from `G:\DevTools\MSVC\Redist\<ver>\x64\Microsoft.VC144.CRT\`
-next to `LumaForge.exe` (app-local deployment); no installer-side redist needed.
+The machine already has the VC++ 2015–2022 x64 runtime (14.51) in `System32`, but the build tree
+does not rely on it: the redist DLLs from `G:\DevTools\MSVC\Redist\<ver>\x64\Microsoft.VC143.CRT\`
+are deployed next to `LumaForge.exe` (app-local), which is also how a packaged build will ship.
 
 ## Target machine (for reference)
 

@@ -66,8 +66,11 @@ int main(int argc, char* argv[]) {
 
     // One D3D11 device for the whole application. Failure is not fatal: the
     // preview widget renders in software and the diagnostics explain why.
+    // --software-preview forces that path (support/testing switch).
     std::shared_ptr<lf::hw::GpuDevice> gpu;
-    if (auto created = lf::hw::GpuDevice::create({.allowDebugLayer = false})) {
+    if (app.arguments().contains(QStringLiteral("--software-preview"))) {
+        LF_LOG_INFO("hw", "--software-preview: skipping D3D11 device creation");
+    } else if (auto created = lf::hw::GpuDevice::create({.allowDebugLayer = false})) {
         gpu = std::move(created.value());
     } else {
         LF_LOG_WARN("hw", "no D3D11 device: {}", created.error().fullText());

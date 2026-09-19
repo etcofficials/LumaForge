@@ -61,7 +61,9 @@ void FileSink::write(const Entry& entry) {
     const auto wide = utf8ToWide(line);
     std::lock_guard lock(m_mutex);
     std::fputws(wide.c_str(), static_cast<FILE*>(m_file));
-    if (entry.level >= Level::Warn) std::fflush(static_cast<FILE*>(m_file));
+    // Log volume is low; flushing per line keeps the file truthful if we crash
+    // and lets it be tailed while the app runs.
+    std::fflush(static_cast<FILE*>(m_file));
 }
 
 void FileSink::flush() {

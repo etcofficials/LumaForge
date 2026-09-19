@@ -26,7 +26,9 @@ cmake --build --preset debug
 .\build\debug\bin\LumaForge.exe               # add --diagnostics[=graphics|log] to open Diagnostics on start
 ```
 
-Debug executables need the debug CRT DLLs on `PATH`; `setup-environment.ps1` takes care of that.
+The environment script is needed to *build*. Running needs nothing: every build deploys the Qt runtime,
+plugins, the matching MSVC runtime and the FFmpeg DLLs into `build/<preset>/bin` (see `cmake/LumaForgeDeploy.cmake`),
+so `LumaForge.exe` starts from Explorer or any shell. `--software-preview` forces the software preview path.
 
 ## Repository layout
 

@@ -8,11 +8,7 @@ target_link_libraries(LumaForge PRIVATE
     Qt6::Widgets)
 set_target_properties(LumaForge PROPERTIES OUTPUT_NAME "LumaForge")
 
-# FFmpeg DLLs next to the executable so it runs from the build tree without
-# PATH help. copy_if_different keeps incremental builds cheap. Qt DLLs are
-# found via the environment during development; `windeployqt` handles them
-# for distribution (see TOOLS.md).
-add_custom_command(TARGET LumaForge POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FFmpeg_RUNTIME_DLLS} $<TARGET_FILE_DIR:LumaForge>
-    COMMAND_EXPAND_LISTS
-    COMMENT "Copying FFmpeg runtime DLLs")
+# Make build/<preset>/bin runnable from any shell: Qt DLLs + plugins, the
+# matching MSVC runtime and the FFmpeg DLLs land next to the executable.
+include(LumaForgeDeploy)
+lumaforge_deploy_runtime(LumaForge)
