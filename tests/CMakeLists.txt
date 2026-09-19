@@ -1,11 +1,14 @@
-# Unit tests for the Qt-free engine modules. A tiny header-only harness keeps
-# the dependency footprint at zero; it can be swapped for Catch2/doctest later
-# without touching the test bodies much.
+# Unit + integration tests for the Qt-free engine modules. A tiny header-only
+# harness keeps the dependency footprint at zero. Integration tests use the
+# deterministic media in tests/media (generated with the bundled ffmpeg.exe).
 add_executable(lf_tests
     TestMain.h
     test_time.cpp
     test_undo.cpp
     test_frame_layout.cpp
+    test_media.cpp
+    test_project.cpp
 )
-target_link_libraries(lf_tests PRIVATE lumaforge::core lumaforge::commands lumaforge::rendering)
+target_link_libraries(lf_tests PRIVATE lumaforge::core lumaforge::commands lumaforge::rendering lumaforge::media lumaforge::project)
+target_compile_definitions(lf_tests PRIVATE LF_TEST_MEDIA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")
 add_test(NAME lf_tests COMMAND lf_tests)

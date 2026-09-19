@@ -13,12 +13,18 @@ qt_add_library(lf_ui STATIC
     timeline/TimelineView.h timeline/TimelineView.cpp
     timeline/TimelinePanel.h timeline/TimelinePanel.cpp
     dialogs/DiagnosticsDialog.h dialogs/DiagnosticsDialog.cpp
+    dialogs/MediaPropertiesDialog.h dialogs/MediaPropertiesDialog.cpp
+    media/MediaModel.h      media/MediaModel.cpp
+    media/MediaTileDelegate.h media/MediaTileDelegate.cpp
+    media/ThumbnailService.h media/ThumbnailService.cpp
+    media/ImportController.h media/ImportController.cpp
 )
 add_library(lumaforge::ui ALIAS lf_ui)
 target_include_directories(lf_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(lf_ui
     PUBLIC Qt6::Widgets Qt6::Svg
-           lumaforge::core lumaforge::commands lumaforge::hardware lumaforge::rendering lumaforge::diagnostics)
+           lumaforge::core lumaforge::commands lumaforge::hardware lumaforge::rendering lumaforge::diagnostics
+           lumaforge::media lumaforge::project)
 
 # Theme + icons are compiled into the binary; no loose files to lose at runtime.
 qt_add_resources(lf_ui "lf_ui_resources"
@@ -50,4 +56,11 @@ qt_add_resources(lf_ui "lf_ui_resources"
         "${CMAKE_SOURCE_DIR}/resources/icons/diagnostics.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/media-empty.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/inspector-empty.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/media-video.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/media-audio.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/media-image.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/view-grid.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/view-list.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/sort.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/add-to-timeline.svg"
 )

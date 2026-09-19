@@ -8,6 +8,7 @@
 #include "ui/Icons.h"
 #include "ui/Theme.h"
 #include "ui/dialogs/DiagnosticsDialog.h"
+#include "ui/media/ImportController.h"
 #include "ui/panels/InspectorPanel.h"
 #include "ui/panels/MediaPanel.h"
 #include "ui/preview/PreviewPanel.h"
@@ -17,6 +18,9 @@
 
 #include <QApplication>
 #include <QCloseEvent>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QLabel>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -35,7 +39,9 @@ constexpr const char* kLog = "ui";
 }
 
 MainWindow::MainWindow(std::shared_ptr<hw::GpuDevice> gpu, std::shared_ptr<log::RingBufferSink> logSink, QWidget* parent)
-    : QMainWindow(parent), m_gpu(std::move(gpu)), m_logSink(std::move(logSink)), m_actions(new ActionRegistry(this)) {
+    : QMainWindow(parent), m_gpu(std::move(gpu)), m_logSink(std::move(logSink)), m_actions(new ActionRegistry(this)),
+      m_document(std::make_unique<project::Document>()), m_importer(new ImportController(*m_document, this)) {
+    setAcceptDrops(true);
     setWindowIcon(QIcon(QStringLiteral(":/icons/app.svg")));
     setMinimumSize(1024, 640);
     resize(1440, 860);
@@ -47,7 +53,7 @@ MainWindow::MainWindow(std::shared_ptr<hw::GpuDevice> gpu, std::shared_ptr<log::
     buildStatusBar();
     connectActions();
 
-    m_undoStack.setChangeListener([this] { updateUndoActions(); updateWindowTitle(); });
+    m_document->undoStack().setChangeListener([this] { updateUndoActions(); updateWindowTitle(); });
     updateUndoActions();
     updateWindowTitle();
     updateTimeReadouts();
@@ -160,7 +166,7 @@ void MainWindow::buildToolBar() {
 }
 
 void MainWindow::buildCentralLayout() {
-    m_mediaPanel = new MediaPanel(*m_actions, this);
+    m_mediaPanel = new MediaPanel(*m_document, *m_actions, *m_importer, this);
     m_previewPanel = new PreviewPanel(*m_actions, this);
     m_inspectorPanel = new InspectorPanel(this);
     m_timelinePanel = new TimelinePanel(*m_actions, this);
@@ -212,12 +218,18 @@ void MainWindow::connectActions() {
     m_actions->connect(ActionId::ProjectSave, this, [this] { notYetAvailable(tr("Save")); });
     m_actions->connect(ActionId::ProjectSaveAs, this, [this] { notYetAvailable(tr("Save As")); });
     m_actions->connect(ActionId::ProjectSettings, this, [this] { notYetAvailable(tr("Project Settings")); });
-    m_actions->connect(ActionId::MediaImport, this, [this] { notYetAvailable(tr("Import Media")); });
+    m_actions->connect(ActionId::MediaImport, this, [this] { m_importer->importWithDialog(this); });
+    connect(m_importer, &ImportController::importStarted, this, [this](int n) { statusBar()->showMessage(tr("Importing %n file(s)…", nullptr, n)); });
+    connect(m_importer, &ImportController::importFinished, this, [this](int ok, int failed) {
+        statusBar()->showMessage(failed ? tr("Imported %1, %2 failed").arg(ok).arg(failed) : tr("Imported %n file(s)", nullptr, ok), 4000);
+    });
+    connect(m_mediaPanel, &MediaPanel::openRequested, this, [this](project::MediaId) { notYetAvailable(tr("Source preview")); });
+    connect(m_mediaPanel, &MediaPanel::addToTimelineRequested, this, [this](const QList<project::MediaId>&) { notYetAvailable(tr("Add to timeline")); });
     m_actions->connect(ActionId::Export, this, [this] { notYetAvailable(tr("Export")); });
     m_actions->connect(ActionId::AppQuit, this, [this] { close(); });
 
-    m_actions->connect(ActionId::EditUndo, this, [this] { m_undoStack.undo(); });
-    m_actions->connect(ActionId::EditRedo, this, [this] { m_undoStack.redo(); });
+    m_actions->connect(ActionId::EditUndo, this, [this] { m_document->undoStack().undo(); });
+    m_actions->connect(ActionId::EditRedo, this, [this] { m_document->undoStack().redo(); });
 
     m_actions->connect(ActionId::PlayPause, this, [this] { togglePlayback(); });
     m_actions->connect(ActionId::PlayStop, this, [this] { stopPlayback(); });
@@ -244,17 +256,18 @@ void MainWindow::connectActions() {
 // ---------------------------------------------------------------- state
 
 void MainWindow::updateUndoActions() {
-    const auto undoText = QString::fromStdString(m_undoStack.undoText());
-    const auto redoText = QString::fromStdString(m_undoStack.redoText());
-    m_actions->setEnabled(ActionId::EditUndo, m_undoStack.canUndo());
-    m_actions->setEnabled(ActionId::EditRedo, m_undoStack.canRedo());
+    auto& undo = m_document->undoStack();
+    const auto undoText = QString::fromStdString(undo.undoText());
+    const auto redoText = QString::fromStdString(undo.redoText());
+    m_actions->setEnabled(ActionId::EditUndo, undo.canUndo());
+    m_actions->setEnabled(ActionId::EditRedo, undo.canRedo());
     m_actions->setText(ActionId::EditUndo, undoText.isEmpty() ? tr("&Undo") : tr("&Undo %1").arg(undoText));
     m_actions->setText(ActionId::EditRedo, redoText.isEmpty() ? tr("&Redo") : tr("&Redo %1").arg(redoText));
 }
 
 void MainWindow::updateWindowTitle() {
     const QString name = m_projectName.isEmpty() ? tr("Untitled") : m_projectName;
-    setWindowTitle(QStringLiteral("%1%2 — LumaForge").arg(name, m_undoStack.isClean() ? QString() : QStringLiteral("*")));
+    setWindowTitle(QStringLiteral("%1%2 — LumaForge").arg(name, m_document->isDirty() ? QStringLiteral("*") : QString()));
 }
 
 void MainWindow::updateTimeReadouts() {
@@ -277,6 +290,8 @@ void MainWindow::setHardwareReport(hw::HwReport report) {
 }
 
 void MainWindow::openDiagnostics(const QString& tab) { showDiagnostics(tab); }
+
+void MainWindow::importFiles(const QStringList& paths) { m_importer->importFiles(paths, this); }
 
 void MainWindow::showDiagnostics(const QString& tab) {
     if (!m_diagnostics) {
@@ -340,6 +355,18 @@ void MainWindow::onPlaybackTick() {
         return;
     }
     tl->setPlayhead(t);
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
+    // Files from Explorer dropped anywhere on the window import into the bin.
+    if (event->mimeData()->hasUrls() && !ImportController::collectMediaPaths(event->mimeData()->urls()).isEmpty()) event->acceptProposedAction();
+}
+
+void MainWindow::dropEvent(QDropEvent* event) {
+    const QStringList paths = ImportController::collectMediaPaths(event->mimeData()->urls());
+    if (paths.isEmpty()) return;
+    event->acceptProposedAction();
+    m_importer->importFiles(paths, this);
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {

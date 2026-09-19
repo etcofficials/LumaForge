@@ -5,6 +5,8 @@ add_subdirectory(core)
 add_subdirectory(diagnostics)
 add_subdirectory(hardware)
 add_subdirectory(commands)
+add_subdirectory(media)
+add_subdirectory(project)
 add_subdirectory(rendering)
 
 add_subdirectory(ui)

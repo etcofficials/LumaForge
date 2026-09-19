@@ -4,6 +4,7 @@
 #include "lumaforge/core/Log.h"
 #include "lumaforge/core/Time.h"
 #include "lumaforge/hardware/HwCapabilities.h"
+#include "lumaforge/project/Document.h"
 
 #include <QElapsedTimer>
 #include <QMainWindow>
@@ -22,6 +23,7 @@ namespace lf::ui {
 
 class ActionRegistry;
 class DiagnosticsDialog;
+class ImportController;
 class InspectorPanel;
 class MediaPanel;
 class PreviewPanel;
@@ -36,9 +38,13 @@ public:
     // Called once background hardware detection completes.
     void setHardwareReport(hw::HwReport report);
     void openDiagnostics(const QString& tab = {});
+    // Imports media files (e.g. passed on the command line or via 'Open with').
+    void importFiles(const QStringList& paths);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private:
     void buildMenus();
@@ -64,7 +70,8 @@ private:
     std::optional<hw::HwReport> m_hardware;
 
     ActionRegistry* m_actions;
-    cmd::UndoStack m_undoStack;
+    std::unique_ptr<project::Document> m_document;
+    ImportController* m_importer = nullptr;
 
     QSplitter* m_mainSplitter = nullptr;
     QSplitter* m_topSplitter = nullptr;

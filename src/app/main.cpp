@@ -11,6 +11,7 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QFileInfo>
 #include <QIcon>
 #include <QSettings>
 #include <QThread>
@@ -78,9 +79,14 @@ int main(int argc, char* argv[]) {
 
     lf::ui::MainWindow window(gpu, logSink);
     window.show();
-    for (const QString& arg : app.arguments()) {
+    QStringList filesToImport;
+    const QStringList args = app.arguments();
+    for (int i = 1; i < args.size(); ++i) {
+        const QString& arg = args[i];
         if (arg.startsWith(QStringLiteral("--diagnostics"))) window.openDiagnostics(arg.section(QLatin1Char('='), 1));
+        else if (!arg.startsWith(QStringLiteral("--")) && QFileInfo::exists(arg)) filesToImport << arg;
     }
+    if (!filesToImport.isEmpty()) window.importFiles(filesToImport);
 
     // Full hardware detection (decoder profiles, encoder probes) runs off the
     // UI thread; encoder probing loads vendor DLLs and can take a while.
