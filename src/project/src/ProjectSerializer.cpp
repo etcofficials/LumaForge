@@ -51,7 +51,7 @@ json write(const TextParams& t) {
             {"color", color(t.color)}, {"align", alignName(t.align)}, {"outlineWidth", t.outlineWidth}, {"outlineColor", color(t.outlineColor)},
             {"shadow", t.shadow}, {"shadowOffsetX", t.shadowOffsetX}, {"shadowOffsetY", t.shadowOffsetY}, {"shadowBlur", t.shadowBlur},
             {"shadowColor", color(t.shadowColor)}, {"backgroundOpacity", t.backgroundOpacity}, {"backgroundColor", color(t.backgroundColor)},
-            {"lineSpacing", t.lineSpacing}};
+            {"backgroundPadding", t.backgroundPadding}, {"lineSpacing", t.lineSpacing}, {"letterSpacing", t.letterSpacing}};
 }
 
 json write(const media::VideoStreamInfo& v) {
@@ -167,7 +167,7 @@ void read(const json& j, TextParams& t) {
     get(j, "outlineWidth", t.outlineWidth); getColor(j, "outlineColor", t.outlineColor);
     get(j, "shadow", t.shadow); get(j, "shadowOffsetX", t.shadowOffsetX); get(j, "shadowOffsetY", t.shadowOffsetY); get(j, "shadowBlur", t.shadowBlur);
     getColor(j, "shadowColor", t.shadowColor); get(j, "backgroundOpacity", t.backgroundOpacity); getColor(j, "backgroundColor", t.backgroundColor);
-    get(j, "lineSpacing", t.lineSpacing);
+    get(j, "lineSpacing", t.lineSpacing); get(j, "letterSpacing", t.letterSpacing); get(j, "backgroundPadding", t.backgroundPadding);
 }
 void read(const json& j, media::VideoStreamInfo& v) {
     get(j, "streamIndex", v.streamIndex); get(j, "codecName", v.codecName); get(j, "codecLongName", v.codecLongName); get(j, "profile", v.profile);

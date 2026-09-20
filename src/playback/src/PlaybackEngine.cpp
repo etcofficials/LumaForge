@@ -294,6 +294,46 @@ void PlaybackEngine::pruneReaders() {
     }
 }
 
+std::shared_ptr<render::FrameTexture> PlaybackEngine::textTextureFor(const TextParams& text, int frameW, int frameH) {
+    const std::uint64_t key = render::TextRasterizer::hash(text, frameW, frameH);
+    if (auto it = m_textCache.find(key); it != m_textCache.end()) {
+        it->second.lastUse = ++m_textUseCounter;
+        return it->second.texture;
+    }
+    if (m_textUnavailable) return nullptr;
+    if (!m_text) {
+        auto created = render::TextRasterizer::create();
+        if (!created) {
+            LF_LOG_ERROR(kLog, "text rendering unavailable: {}", created.error().fullText());
+            m_textUnavailable = true;
+            return nullptr;
+        }
+        m_text = std::move(created.value());
+    }
+    auto bitmap = m_text->render(text, frameW, frameH);
+    if (!bitmap) {
+        LF_LOG_WARN(kLog, "text render failed: {}", bitmap.error().fullText());
+        return nullptr;
+    }
+    auto tex = m_compositor->texturePoolPtr()->acquireBgra(bitmap->width, bitmap->height, true);
+    if (!tex) {
+        LF_LOG_WARN(kLog, "text texture failed: {}", tex.error().fullText());
+        return nullptr;
+    }
+    if (auto s = (*tex)->fillBgra(bitmap->bgra.data(), bitmap->width * 4, true); !s) {
+        LF_LOG_WARN(kLog, "text upload failed: {}", s.error().fullText());
+        return nullptr;
+    }
+    // Bounded: a title change per slider tick must not accumulate 8 MB textures.
+    constexpr std::size_t kMaxTextTextures = 6;
+    while (m_textCache.size() >= kMaxTextTextures) {
+        auto oldest = std::min_element(m_textCache.begin(), m_textCache.end(), [](const auto& a, const auto& b) { return a.second.lastUse < b.second.lastUse; });
+        m_textCache.erase(oldest);
+    }
+    m_textCache[key] = TextEntry{*tex, ++m_textUseCounter};
+    return *tex;
+}
+
 void PlaybackEngine::ensureTarget(int frameW, int frameH) {
     int w = frameW, h = frameH;
     auto scaleToHeight = [&](int targetH) {
@@ -341,7 +381,21 @@ void PlaybackEngine::renderOnce(TimePoint t, bool vsync) {
     bool starved = false;
     std::string decoderName = "-";
     for (const auto& req : m_layerRequests) {
-        if (req.path.empty()) continue;   // generated layers (text) arrive with the text rasteriser
+        if (req.path.empty()) {
+            // Generated layer: text rendered at frame size, cached by content.
+            if (!req.text) continue;
+            auto tex = textTextureFor(*req.text, fw, fh);
+            if (!tex) continue;
+            render::Layer layer;
+            layer.texture = std::move(tex);
+            layer.transform = req.transform;
+            layer.crop = req.crop;
+            layer.color = req.color;
+            layer.effects = req.effects;
+            layer.fitToFrame = true;
+            m_layers.push_back(std::move(layer));
+            continue;
+        }
         VideoReader& reader = readerFor(req);
         bool exact = false;
         auto tex = reader.frameAt(req.sourceTime, exact);
@@ -496,6 +550,8 @@ void PlaybackEngine::threadMain() {
     }
     // Release GPU objects on the thread that used them.
     m_readers.clear();
+    m_textCache.clear();
+    m_text.reset();
     m_target.reset();
     m_surface.reset();
 }

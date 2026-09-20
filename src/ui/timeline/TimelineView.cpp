@@ -424,6 +424,9 @@ void TimelineView::addTextClip() {
     c.name = tr("Title").toStdString();
     c.start = m_playhead;
     c.duration = ops::kDefaultTextDuration;
+    c.text.fontSize = static_cast<float>(m_doc.project().settings.height) * 0.09f;
+    c.text.shadow = true;
+    c.text.shadowBlur = 8.0f;
     selectAdded(ops::insertClips(m_doc, {c}), tr("Add Text"));
 }
 

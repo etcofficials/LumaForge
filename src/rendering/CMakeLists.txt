@@ -5,13 +5,15 @@ add_library(lf_rendering STATIC
     include/lumaforge/rendering/PreviewRenderer.h
     include/lumaforge/rendering/FrameTexture.h
     include/lumaforge/rendering/Compositor.h
+    include/lumaforge/rendering/TextRasterizer.h
     src/PreviewRenderer.cpp
     src/FrameTexture.cpp
     src/Compositor.cpp
+    src/TextRasterizer.cpp
 )
 add_library(lumaforge::rendering ALIAS lf_rendering)
 target_include_directories(lf_rendering PUBLIC include)
-target_link_libraries(lf_rendering PUBLIC lumaforge::core lumaforge::hardware lumaforge::media PRIVATE d3d11 dxgi)
+target_link_libraries(lf_rendering PUBLIC lumaforge::core lumaforge::hardware lumaforge::media PRIVATE d3d11 dxgi d2d1 dwrite windowscodecs ole32)
 
 lumaforge_add_shaders(lf_rendering
     "${CMAKE_SOURCE_DIR}/resources/shaders/quad_vs.hlsl"  main vs_4_0 g_quad_vs

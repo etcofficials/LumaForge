@@ -5,6 +5,7 @@
 #include "lumaforge/playback/Program.h"
 #include "lumaforge/rendering/Compositor.h"
 #include "lumaforge/rendering/PreviewRenderer.h"
+#include "lumaforge/rendering/TextRasterizer.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -88,6 +89,8 @@ private:
     void ensureTarget(int frameW, int frameH);
     VideoReader& readerFor(const VideoLayerRequest& req);
     void pruneReaders();
+    // Rasterised text layers, keyed by content hash; bounded LRU.
+    std::shared_ptr<render::FrameTexture> textTextureFor(const TextParams& text, int frameW, int frameH);
     void notifyPosition(TimePoint t, bool force);
     void wake() { m_cv.notify_all(); }
     TimePoint clockNow() const;
@@ -120,6 +123,14 @@ private:
         std::chrono::steady_clock::time_point lastUsed;
     };
     std::unordered_map<std::string, ReaderEntry> m_readers;
+    struct TextEntry {
+        std::shared_ptr<render::FrameTexture> texture;
+        std::uint64_t lastUse = 0;
+    };
+    std::unique_ptr<render::TextRasterizer> m_text;     // created lazily on the render thread
+    bool m_textUnavailable = false;
+    std::unordered_map<std::uint64_t, TextEntry> m_textCache;
+    std::uint64_t m_textUseCounter = 0;
     std::vector<VideoLayerRequest> m_layerRequests;
     std::vector<render::Layer> m_layers;
 

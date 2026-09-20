@@ -5,6 +5,7 @@
 #include "ui/inspector/TransformSection.h"
 #include "ui/inspector/ColorSection.h"
 #include "ui/inspector/EffectsSection.h"
+#include "ui/inspector/TextSections.h"
 #include "ui/widgets/EmptyState.h"
 #include "ui/widgets/PanelHeader.h"
 
@@ -48,6 +49,12 @@ InspectorPanel::InspectorPanel(Document& doc, QWidget* parent) : QWidget(parent)
     layout->addWidget(m_stack, 1);
 
     addSection(new ClipInfoSection(*this, host));
+    addSection(new TextContentSection(*this, host));
+    addSection(new TypographySection(*this, host));
+    addSection(new TextStyleSection(TextStyleSection::Part::Fill, *this, host));
+    addSection(new TextStyleSection(TextStyleSection::Part::Outline, *this, host));
+    addSection(new TextStyleSection(TextStyleSection::Part::Shadow, *this, host));
+    addSection(new TextStyleSection(TextStyleSection::Part::Background, *this, host));
     addSection(new TransformSection(*this, host));
     addSection(new CropSection(*this, host));
     addSection(new ColorSection(*this, host));

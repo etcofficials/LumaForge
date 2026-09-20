@@ -119,7 +119,9 @@ struct TextParams {
     ColorRgba shadowColor{0.0f, 0.0f, 0.0f, 0.75f};
     float backgroundOpacity = 0.0f;    // box behind the text, 0 = none
     ColorRgba backgroundColor{0.0f, 0.0f, 0.0f, 1.0f};
-    float lineSpacing = 1.0f;
+    float backgroundPadding = 24.0f;   // frame pixels around the text block
+    float lineSpacing = 1.0f;          // multiple of the font's natural line height
+    float letterSpacing = 0.0f;        // extra advance per character, frame pixels
     friend bool operator==(const TextParams&, const TextParams&) = default;
 };
 

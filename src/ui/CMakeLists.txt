@@ -13,6 +13,8 @@ qt_add_library(lf_ui STATIC
     inspector/TransformSection.h inspector/TransformSection.cpp
     inspector/ColorSection.h inspector/ColorSection.cpp
     inspector/EffectsSection.h inspector/EffectsSection.cpp
+    inspector/TextSections.h inspector/TextSections.cpp
+    widgets/ColorButton.h   widgets/ColorButton.cpp
     panels/MediaPanel.h     panels/MediaPanel.cpp
     panels/InspectorPanel.h panels/InspectorPanel.cpp
     preview/PreviewWidget.h preview/PreviewWidget.cpp
