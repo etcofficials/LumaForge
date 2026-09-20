@@ -29,8 +29,11 @@ public:
     ~MediaPanel() override;
 
     [[nodiscard]] QList<project::MediaId> selectedMedia() const;
+    // Cached thumbnail (null until generated); requests generation on a miss.
+    [[nodiscard]] QImage thumbnail(project::MediaId id) const;
 
 signals:
+    void thumbnailsChanged();
     void openRequested(lf::project::MediaId id);          // double-click: source preview
     void addToTimelineRequested(const QList<lf::project::MediaId>& ids);
     void selectionChanged(const QList<lf::project::MediaId>& ids);

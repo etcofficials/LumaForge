@@ -2,7 +2,9 @@
 
 #include "ui/Theme.h"
 
+#include <QEvent>
 #include <QFormLayout>
+#include <QMouseEvent>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QSettings>
@@ -53,6 +55,7 @@ CollapsibleSection::CollapsibleSection(const QString& title, const QString& sett
     layout->addWidget(m_content);
 
     connect(m_toggle, &QToolButton::clicked, this, [this] { setExpanded(!m_expanded); });
+    m_headerRow->installEventFilter(this);   // the whole strip toggles, not just the arrow
     m_expanded = QSettings().value(m_key, true).toBool();
     m_content->setVisible(m_expanded);
     updateArrow();
@@ -95,6 +98,15 @@ void CollapsibleSection::setExpanded(bool expanded) {
 }
 
 void CollapsibleSection::setSubtitle(const QString& text) { m_subtitle->setText(text); }
+
+bool CollapsibleSection::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_headerRow && event->type() == QEvent::MouseButtonRelease) {
+        auto* me = static_cast<QMouseEvent*>(event);
+        // Clicks on the header buttons (Reset...) are theirs; the strip itself toggles.
+        if (me->button() == Qt::LeftButton && !m_headerRow->childAt(me->position().toPoint())) { setExpanded(!m_expanded); return true; }
+    }
+    return QWidget::eventFilter(watched, event);
+}
 
 void CollapsibleSection::updateArrow() { m_toggle->setArrowType(m_expanded ? Qt::DownArrow : Qt::RightArrow); }
 

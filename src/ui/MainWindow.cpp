@@ -284,6 +284,8 @@ void MainWindow::connectActions() {
 
     // Timeline <-> preview
     auto* tl = m_timelinePanel->view();
+    tl->setThumbnailProvider([this](project::MediaId id) { return m_mediaPanel->thumbnail(id); });
+    connect(m_mediaPanel, &MediaPanel::thumbnailsChanged, tl, &TimelineView::thumbnailsChanged);
     connect(tl, &TimelineView::userSeeked, this, [this](TimePoint t, bool scrubbing) {
         if (m_playback->mode() != PlaybackController::Mode::Sequence) showSequenceInPreview(t);
         m_playback->seek(t, scrubbing);

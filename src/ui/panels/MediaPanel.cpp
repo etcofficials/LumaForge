@@ -76,6 +76,7 @@ MediaPanel::MediaPanel(project::Document& doc, ActionRegistry& actions, ImportCo
     m_thumbnails = new ThumbnailService(this);
     connect(m_model, &MediaModel::thumbnailNeeded, m_thumbnails, &ThumbnailService::request);
     connect(m_thumbnails, &ThumbnailService::ready, m_model, &MediaModel::setThumbnail);
+    connect(m_thumbnails, &ThumbnailService::ready, this, [this] { emit thumbnailsChanged(); });
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -267,6 +268,11 @@ void MediaPanel::showContextMenu(const QPoint& globalPos) {
     }
     menu.addAction(m_actions.action(ActionId::MediaImport));
     menu.exec(globalPos);
+}
+
+QImage MediaPanel::thumbnail(project::MediaId id) const {
+    const QModelIndex idx = m_model->indexOf(id);
+    return idx.isValid() ? idx.data(MediaModel::ThumbnailRole).value<QImage>() : QImage();
 }
 
 void MediaPanel::removeSelected() {

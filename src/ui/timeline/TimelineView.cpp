@@ -92,11 +92,15 @@ void TimelineView::onDocumentChange(const Change& change) {
             break;
         case Change::Kind::ClipsChanged:
         case Change::Kind::MediaRemoved:
-        case Change::Kind::MediaChanged:
+        case Change::Kind::MediaChanged: {
             pruneSelection();
+            const Duration before = m_sequenceDuration;
             refreshDuration();
-            update();
+            // Clip rows only; the ruler repaints when the sequence end moved.
+            update(lanesRect());
+            if (before != m_sequenceDuration) update(QRect(headerWidth(), 0, width() - headerWidth(), rulerHeight()));
             break;
+        }
         default:
             break;
     }
@@ -345,10 +349,30 @@ void TimelineView::zoomToFit() {
 
 void TimelineView::setSelection(const std::vector<ClipId>& ids) {
     if (ids == m_selection) return;
+    std::vector<ClipId> dirty = m_selection;
+    dirty.insert(dirty.end(), ids.begin(), ids.end());
     m_selection = ids;
-    update();
+    updateClipRects(dirty);
     emit selectionChanged();
 }
+
+QRect TimelineView::lanesRect() const {
+    const int bottom = m_lanes.empty() ? rulerHeight() : m_lanes.back().y + m_lanes.back().height;
+    return QRect(headerWidth(), rulerHeight(), std::max(0, width() - headerWidth()), std::max(0, bottom - rulerHeight()));
+}
+
+void TimelineView::updateClipRects(const std::vector<ClipId>& ids) {
+    QRegion region;
+    const auto& seq = m_doc.project().sequence;
+    for (auto id : ids) {
+        if (const Clip* c = seq.findClip(id)) region += clipRect(*c).toAlignedRect().adjusted(-2, -2, 2, 2);
+    }
+    if (region.isEmpty()) return;
+    update(region.intersected(lanesRect()));
+}
+
+void TimelineView::setThumbnailProvider(ThumbnailProvider provider) { m_thumbnails = std::move(provider); }
+void TimelineView::thumbnailsChanged() { update(lanesRect()); }
 
 void TimelineView::selectAll() {
     std::vector<ClipId> ids;
@@ -1173,6 +1197,21 @@ void TimelineView::paintClip(QPainter& p, const Clip& c, const QRectF& r, bool s
     QColor strip = base.lighter(selected ? 130 : 110);
     strip.setAlpha(alpha);
     p.fillRect(QRectF(r.left(), r.top(), r.width(), 4), strip);
+    // Video / image: poster frame at the right edge when there is room for it
+    // next to the label; the label is elided to stay clear of it.
+    double labelReserve = 0;
+    if ((c.kind == ClipKind::Video || c.kind == ClipKind::Image) && r.width() > 120 && r.height() > 30 && m_thumbnails) {
+        const QImage thumb = m_thumbnails(c.media);
+        if (!thumb.isNull()) {
+            const double th = r.height() - 8;
+            const double tw = std::min(th * thumb.width() / std::max(1, thumb.height()), r.width() * 0.45);
+            QRectF tr(r.right() - tw - 4, r.top() + 6, tw, th);
+            p.setOpacity(ghost || dimmed ? 0.45 : 0.85);
+            p.drawImage(tr, thumb);
+            p.setOpacity(1.0);
+            labelReserve = tw + 8;
+        }
+    }
     // Audio: real peak envelope (analysed in the background), one column per pixel.
     if (c.kind == ClipKind::Audio && r.width() > 10) {
         std::shared_ptr<const media::Waveform> wave;
@@ -1223,7 +1262,7 @@ void TimelineView::paintClip(QPainter& p, const Clip& c, const QRectF& r, bool s
         QColor text = pal.textPrimary;
         text.setAlpha(alpha);
         p.setPen(text);
-        const QRectF textRect(r.left() + 8, r.top() + 5, r.width() - 16, std::min(18.0, r.height() - 6));
+        const QRectF textRect(r.left() + 8, r.top() + 5, r.width() - 16 - labelReserve, std::min(18.0, r.height() - 6));
         const QString name = p.fontMetrics().elidedText(QString::fromStdString(c.name), Qt::ElideMiddle, static_cast<int>(textRect.width()));
         p.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, name);
         if (r.height() > 36 && r.width() > 90) {
@@ -1235,7 +1274,7 @@ void TimelineView::paintClip(QPainter& p, const Clip& c, const QRectF& r, bool s
             p.setPen(sub);
             QString detail = formatClock(c.duration);
             if (c.speed != Rational{1, 1}) detail += QStringLiteral("  ·  %1%").arg(std::llround(c.speed.toDouble() * 100));
-            p.drawText(QRectF(r.left() + 8, r.top() + 22, r.width() - 16, 16), Qt::AlignLeft | Qt::AlignVCenter, detail);
+            p.drawText(QRectF(r.left() + 8, r.top() + 22, r.width() - 16 - labelReserve, 16), Qt::AlignLeft | Qt::AlignVCenter, detail);
         }
     }
     p.setRenderHint(QPainter::Antialiasing, false);

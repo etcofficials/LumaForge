@@ -67,3 +67,29 @@ macro never truncates the redo branch. Consecutive commands can coalesce via `me
 `ui/` and `app/` link Qt. Tests link engine libs directly.
 **Consequences.** Slightly more CMake; clean dependency direction; the media engine can be
 benchmarked headless.
+
+## ADR-009 — One generic timeline command over a computed diff
+**Context.** Move, trim, split, delete, ripple, paste, duplicate, speed and every Inspector slider
+all need undo; per-operation command classes would multiply state-capture bugs.
+**Decision.** `ops::*` are pure functions returning a `SequenceEdit`; `SequenceEditCommand` applies
+it, records the before-state on first execution and merges consecutive edits with the same
+`mergeId`. A merge is refused across the saved (clean) state.
+**Consequences.** Undo correctness is checked in one place; new operations are functions with unit
+tests of exact numbers; the UI never touches the project directly.
+
+## ADR-010 — Effects as a flattened stack, rendered in the existing layer shader
+**Context.** The GT 730 cannot afford a multi-pass filter chain per layer at 30 fps.
+**Decision.** A clip carries an ordered list of `Effect{type, enabled, amount}`. At program-build
+time `applyEffects` folds it into the `ColorAdjust` the shader already applies plus a small
+`EffectParams` (grayscale/sepia mixes, single-pass 12-tap blur, unsharp-mask sharpen, vignette).
+**Consequences.** New effect types are data + a few shader lines; blur quality is bounded by the
+single pass (acceptable at preview sizes; measured 30 fps with blur + sepia + colour).
+
+## ADR-011 — Text rasterised by DirectWrite/Direct2D into a WIC bitmap, cached by content hash
+**Context.** Titles need real typography (kerning, fallback fonts, outlines) without touching the
+GPU state of the compositor or re-rendering every frame.
+**Decision.** `TextRasterizer` lays out with DirectWrite, converts glyph runs to Direct2D geometry
+(fill / outer stroke / jittered shadow / background box) into a premultiplied BGRA WIC bitmap sized
+to the frame; the engine uploads it once and keeps an LRU of six textures keyed by hash.
+**Consequences.** Device independent, works on WARP; text costs nothing per frame until it changes;
+shadow blur is an approximation (no D2D effects on a WIC target).

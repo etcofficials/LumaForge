@@ -4,7 +4,10 @@
 #include "lumaforge/project/Document.h"
 #include "lumaforge/project/TimelineCommands.h"
 
+#include <QImage>
 #include <QWidget>
+
+#include <functional>
 
 #include <optional>
 #include <vector>
@@ -35,6 +38,10 @@ public:
     [[nodiscard]] EditTool tool() const noexcept { return m_tool; }
     // Shared peak cache (owned by the panel); repaints when peaks arrive.
     void setWaveformService(WaveformService* service);
+    // Poster frames for video clips come from the media bin's thumbnail cache.
+    using ThumbnailProvider = std::function<QImage(project::MediaId)>;
+    void setThumbnailProvider(ThumbnailProvider provider);
+    void thumbnailsChanged();   // repaint clip rows after new thumbnails arrived
     [[nodiscard]] bool canPaste() const noexcept { return !m_clipboard.empty(); }
 
     [[nodiscard]] TimePoint playhead() const noexcept { return m_playhead; }
@@ -162,6 +169,9 @@ private:
     void paintHeaders(QPainter& p);
     void paintTracks(QPainter& p, const QRect& area, const TickSpec& ticks);
     void paintClips(QPainter& p, const QRect& area);
+    // Repaints only the rows/rects that can have changed.
+    void updateClipRects(const std::vector<project::ClipId>& ids);
+    [[nodiscard]] QRect lanesRect() const;
     void paintClip(QPainter& p, const project::Clip& c, const QRectF& r, bool selected, bool ghost, bool dimmed);
     void paintDropGhosts(QPainter& p);
     void paintMarquee(QPainter& p);
@@ -187,6 +197,7 @@ private:
     project::Document& m_doc;
     int m_listenerToken = 0;
     WaveformService* m_waveforms = nullptr;
+    ThumbnailProvider m_thumbnails;
 
     Rational m_fps = fps::f30;
     Duration m_sequenceDuration;           // end of the last clip

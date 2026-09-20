@@ -28,6 +28,9 @@ public:
 signals:
     void toggled(bool expanded);
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
     void updateArrow();
 

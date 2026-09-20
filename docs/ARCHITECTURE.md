@@ -24,24 +24,47 @@ export). Decisions with rationale live in [DECISIONS.md](DECISIONS.md).
 
 ```
 src/
-  core/         Time (flicks), Rational, Result/Error, Log (sinks: file, debugger, ring buffer), StringUtil, Version
-  hardware/     GpuDevice (the one D3D11 device), HardwareDetector (DXGI adapters, decoder profiles,
-                encoder probes), HwCapabilities (report types)
-  rendering/    PreviewRenderer (D3D11 flip-model swap chain on a native HWND), FrameLayout (letterbox math)
+  core/         Time (flicks), Rational, Result/Error, Log, StringUtil, Version,
+                VisualParams (Transform2D, Crop, ColorAdjust, Effect stack + applyEffects, TextParams)
+  hardware/     GpuDevice (the one D3D11 device, WARP fallback), HardwareDetector, HwCapabilities
+  media/        MediaProbe, Thumbnailer, VideoDecoder (D3D11VA / software), AudioDecoder (swresample),
+                VideoFrame, Waveform (peak envelopes)
+  rendering/    FrameTexture pool (NV12/I420/BGRA), Compositor (layers -> render target, HLSL built by fxc),
+                PreviewRenderer (flip-model swap chain), TextRasterizer (DirectWrite + Direct2D -> BGRA)
+  audio/        AudioOutput (WASAPI shared, event driven)
+  playback/     Program (SourceProgram / SequenceProgram), VideoReader (per clip decode thread),
+                AudioMixer (gains, fades, speed resampling), PlaybackEngine (render thread, text cache)
+  project/      Ids, MediaItem, Sequence (Track/Clip), Project, Document (undo + listeners),
+                MediaCommands, TimelineCommands (SequenceEdit diff command), TimelineOps (pure edit
+                logic: overwrite/move/trim/split/ripple/paste/duplicate/speed/snap), ProjectSerializer (.lfproj)
   commands/     Command, UndoStack
-  diagnostics/  SystemInfo (CPU/RAM/OS/build facts)
-  ui/           Theme (tokens -> QPalette + QSS), Icons (recoloured SVG), ActionRegistry (all actions
-                and shortcuts), panels (Media, Inspector), preview (PreviewWidget, PreviewPanel),
-                timeline (TimelineView, TimelinePanel), dialogs (Diagnostics), MainWindow
-  app/          main.cpp: logging, GPU device, window, async hardware detection
-tests/          engine unit tests (zero-dependency harness)
-resources/      theme/lumaforge.qss, icons/*.svg
+  diagnostics/  SystemInfo, CrashHandler
+  ui/           Theme, Icons, ActionRegistry (all actions, shortcuts, tools), MainWindow,
+                panels (Media, Inspector), inspector/ (sections: clip, text, typography, transform,
+                crop, color, effects, audio, speed), preview/, timeline/ (view, panel), media/
+                (model, thumbnails, waveforms, import), project/ (ProjectController), dialogs/, widgets/
+  app/          main.cpp: logging, GPU device, window, CLI (--timeline, --source, .lfproj)
+tests/          engine unit + integration tests (real media in tests/media)
+resources/      theme/lumaforge.qss, icons/*.svg, shaders/*.hlsl
 tools/          toolchain fetch/setup/diagnose scripts (see ../TOOLS.md)
 ```
 
-Dependency direction: `app -> ui -> {rendering, hardware, commands, diagnostics} -> core`.
-`rendering -> hardware` (shares `GpuDevice`). FFmpeg is linked by `hardware` (encoder probes,
-hwdevice enumeration) and `diagnostics` (versions); the media engine will link it too.
+Dependency direction: `app -> ui -> {playback, project, rendering, media, hardware, commands,
+diagnostics} -> core`. `playback -> project` (SequenceProgram snapshots the project). Only `ui/`
+and `app/` link Qt.
+
+## Editing model
+
+All timeline state is plain data (`project::Sequence`). Every edit is computed by a pure function in
+`project::ops` as a `SequenceEdit` (clips added / removed / replaced, tracks replaced) and executed
+by one command type, `SequenceEditCommand`, which captures the before-state on first run and can
+coalesce consecutive edits of the same control (`mergeId` = property x gesture). The Inspector's
+sections only ever call `InspectorContext::editSelection` / `pushEdit`; the timeline view only ever
+calls `ops::*` + `commit`. Nothing in the UI mutates the project directly.
+
+Playback consumes an immutable `SequenceProgram` built from the project after each change (one
+rebuild per event-loop turn). Effects are flattened into the shader's colour parameters + looks at
+that point; text layers are rasterised lazily on the render thread and cached by content hash.
 
 ## Threading model (target)
 
@@ -93,12 +116,13 @@ filter must suspend them while a text field is being edited (media rename, proje
 
 ## Timeline view
 
-`TimelineView` is a hand-painted widget: track headers, ruler, lanes, playhead, hover guide.
-Zoom keeps the time under the cursor fixed; the wheel scrolls horizontally, Ctrl+wheel zooms.
-The playhead and hover guide repaint only their own columns (`update(rect)`), so scrubbing does
-not repaint the tracks. Ruler tick spacing is chosen from frame-based and second-based candidates
-to keep labels >= 90 px apart at any zoom. Clips plug into `paintTracks()` once the timeline model
-exists; the coordinate system (`xFromTicks`/`ticksFromX`) is final.
+`TimelineView` is a hand-painted widget: track headers (visibility/mute/solo/lock toggles), ruler,
+lanes, clips (kind colour, name, duration, poster frame, real audio peaks shaped by gain), playhead,
+snap guide, marquee. Zoom keeps the time under the cursor fixed; the wheel scrolls horizontally,
+Ctrl+wheel zooms. Repaints are regional: playhead columns, changed clip rects on selection, lane
+rows on edits, the ruler only when the sequence end moves. Tools (Select / Blade) are a property of
+the view set through the ActionRegistry's exclusive tool actions; gestures (move, trim, marquee,
+scrub) preview through `ops::applied()` and commit one command on release.
 
 ## Logging and diagnostics
 
@@ -110,12 +134,6 @@ the whole report to the clipboard. Settings are stored in `<exe>/LumaForge/LumaF
 
 ## Planned next (in order)
 
-1. `media/`: `MediaProbe` (metadata), `MediaSource`, `Decoder` interface with D3D11VA + software
-   implementations, `VideoFrame` (GPU texture or CPU planes), `AudioBuffer`.
-2. `playback/`: `MasterClock`, `FrameQueue`, `FrameScheduler`, seek coalescing, drop accounting;
-   the render thread; NV12 shader in `rendering/`.
-3. `timeline/`: `Sequence`/`Track`/`Clip` model + edit commands (add, move, trim, split, delete,
-   snapping), media bin model, drag & drop.
-4. `project/`: versioned JSON, relinking, migrations.
-5. `export/`: `ExportJob` with encoder selection from `HwReport`, progress/cancel.
-6. `cache/`: thumbnails, waveforms, frame cache budgets; proxy hooks.
+1. `export/`: compositor readback -> libx264/AAC -> MP4 with progress/cancel; encoder choice from `HwReport`.
+2. Transitions (cross dissolve) and a performance monitor.
+3. Frame cache / proxies for heavier sources; time-stretch (pitch-preserving) for speed changes.
