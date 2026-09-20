@@ -11,6 +11,8 @@
 
 namespace lf::ui {
 
+class WaveformService;
+
 // The timeline canvas: time ruler, track headers, track lanes, clips and
 // playhead. Everything is drawn by hand (no item views) because the timeline
 // is the most performance-sensitive surface in the editor: painting must stay
@@ -31,6 +33,8 @@ public:
     ~TimelineView() override;
 
     [[nodiscard]] EditTool tool() const noexcept { return m_tool; }
+    // Shared peak cache (owned by the panel); repaints when peaks arrive.
+    void setWaveformService(WaveformService* service);
     [[nodiscard]] bool canPaste() const noexcept { return !m_clipboard.empty(); }
 
     [[nodiscard]] TimePoint playhead() const noexcept { return m_playhead; }
@@ -182,6 +186,7 @@ private:
 
     project::Document& m_doc;
     int m_listenerToken = 0;
+    WaveformService* m_waveforms = nullptr;
 
     Rational m_fps = fps::f30;
     Duration m_sequenceDuration;           // end of the last clip

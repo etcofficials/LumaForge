@@ -4,6 +4,9 @@
 #include "ui/widgets/CollapsibleSection.h"
 
 #include <functional>
+#include <vector>
+
+namespace lf::project { class Document; struct SequenceEdit; }
 
 namespace lf::ui {
 
@@ -17,6 +20,10 @@ public:
     // Applies `fn` to every selected clip the section applies to.
     virtual void editSelection(const QString& undoText, int propertyId, const ClipEdit& fn) = 0;
     virtual void endGesture() = 0;
+    // Structural edits (duration changes etc.): the builder receives the
+    // document and the selected clip ids and returns a SequenceEdit.
+    using EditBuilder = std::function<project::SequenceEdit(project::Document&, const std::vector<project::ClipId>&)>;
+    virtual void pushEdit(const QString& undoText, const EditBuilder& build) = 0;
     [[nodiscard]] virtual const project::Project& project() const = 0;
 };
 

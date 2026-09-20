@@ -3,6 +3,7 @@
 #include "ui/ActionRegistry.h"
 #include "ui/Timecode.h"
 #include "ui/timeline/TimelineView.h"
+#include "ui/media/WaveformService.h"
 #include "ui/widgets/PanelHeader.h"
 
 #include <QAction>
@@ -44,6 +45,8 @@ TimelinePanel::TimelinePanel(project::Document& doc, ActionRegistry& actions, QW
     layout->addWidget(m_header);
 
     m_view = new TimelineView(doc, this);
+    m_waveforms = new WaveformService(this);
+    m_view->setWaveformService(m_waveforms);
     layout->addWidget(m_view, 1);
 
     m_scroll = new QScrollBar(Qt::Horizontal, this);
@@ -81,7 +84,11 @@ TimelinePanel::TimelinePanel(project::Document& doc, ActionRegistry& actions, QW
         m_view->setScrollOffset(static_cast<lf::Ticks>(v) * kUnit);
         m_syncing = false;
     });
-    m_listenerToken = m_doc.addListener([this](const project::Change&) { updateActionState(); updateDurationLabel(); });
+    m_listenerToken = m_doc.addListener([this](const project::Change& c) {
+        if (c.kind == project::Change::Kind::MediaChanged || c.kind == project::Change::Kind::MediaRemoved) for (auto id : c.mediaIds) m_waveforms->forget(id);
+        updateActionState();
+        updateDurationLabel();
+    });
     syncScrollBar();
     updateActionState();
     updateDurationLabel();

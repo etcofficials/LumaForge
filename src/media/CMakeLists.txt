@@ -6,6 +6,7 @@ add_library(lf_media STATIC
     include/lumaforge/media/VideoFrame.h
     include/lumaforge/media/VideoDecoder.h
     include/lumaforge/media/AudioDecoder.h
+    include/lumaforge/media/Waveform.h
     src/FFmpegUtil.h
     src/FFmpegUtil.cpp
     src/MediaProbe.cpp
@@ -13,6 +14,7 @@ add_library(lf_media STATIC
     src/VideoFrame.cpp
     src/VideoDecoder.cpp
     src/AudioDecoder.cpp
+    src/Waveform.cpp
 )
 add_library(lumaforge::media ALIAS lf_media)
 target_include_directories(lf_media PUBLIC include)

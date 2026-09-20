@@ -86,10 +86,34 @@ void AudioMixer::render(float* out, int frames) {
         if (drift < -kResyncTolerance || drift > kResyncTolerance) {
             if (auto s = dec.seek(req.sourceTime); !s) continue;
         }
-        auto got = dec.read(m_scratch.data(), frames);
-        if (!got) continue;
-        const int n = *got;
         const float gain = req.gain * master;
+        int n = 0;
+        if (req.speed > 0.0 && std::fabs(req.speed - 1.0) > 1e-6) {
+            // Variable speed: read speed * frames source frames and resample
+            // linearly (pitch follows speed, like tape). Bounded so a 10x clip
+            // cannot ask for an unbounded block.
+            const int want = std::clamp(static_cast<int>(std::lround(frames * req.speed)), 1, frames * 16);
+            m_speedScratch.resize(static_cast<std::size_t>(want + 1) * m_channels);
+            auto got = dec.read(m_speedScratch.data(), want);
+            if (!got || *got <= 1) continue;
+            const int src = *got;
+            for (int i = 0; i < frames; ++i) {
+                const double pos = static_cast<double>(i) * (src - 1) / std::max(1, frames - 1);
+                const int i0 = static_cast<int>(pos);
+                const int i1 = std::min(i0 + 1, src - 1);
+                const float f = static_cast<float>(pos - i0);
+                for (int ch = 0; ch < m_channels; ++ch) {
+                    const float a = m_speedScratch[static_cast<std::size_t>(i0 * m_channels + ch)];
+                    const float b = m_speedScratch[static_cast<std::size_t>(i1 * m_channels + ch)];
+                    m_scratch[static_cast<std::size_t>(i * m_channels + ch)] = a + (b - a) * f;
+                }
+            }
+            n = frames;
+        } else {
+            auto got = dec.read(m_scratch.data(), frames);
+            if (!got) continue;
+            n = *got;
+        }
         if (gain == 0.0f) continue;
         for (int i = 0; i < n * m_channels; ++i) out[i] += m_scratch[static_cast<std::size_t>(i)] * gain;
     }

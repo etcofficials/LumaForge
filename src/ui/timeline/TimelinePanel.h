@@ -12,6 +12,7 @@ namespace lf::ui {
 class ActionRegistry;
 class PanelHeader;
 class TimelineView;
+class WaveformService;
 
 // Timeline panel = header (title, duration, snapping, zoom controls) + canvas
 // + scrollbar. Owns the wiring between the clip actions (split, delete,
@@ -36,6 +37,7 @@ private:
     QLabel* m_durationLabel;
     TimelineView* m_view;
     QScrollBar* m_scroll;
+    WaveformService* m_waveforms;
     bool m_syncing = false;
     int m_listenerToken = 0;
 };

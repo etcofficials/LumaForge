@@ -6,6 +6,7 @@
 #include "ui/inspector/ColorSection.h"
 #include "ui/inspector/EffectsSection.h"
 #include "ui/inspector/TextSections.h"
+#include "ui/inspector/AudioSection.h"
 #include "ui/widgets/EmptyState.h"
 #include "ui/widgets/PanelHeader.h"
 
@@ -20,7 +21,7 @@ using namespace lf::project;
 InspectorPanel::InspectorPanel(Document& doc, QWidget* parent) : QWidget(parent), m_doc(doc) {
     setProperty("panel", true);
     setAttribute(Qt::WA_StyledBackground, true);
-    setMinimumWidth(240);
+    setMinimumWidth(300);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -59,6 +60,8 @@ InspectorPanel::InspectorPanel(Document& doc, QWidget* parent) : QWidget(parent)
     addSection(new CropSection(*this, host));
     addSection(new ColorSection(*this, host));
     addSection(new EffectsSection(*this, host));
+    addSection(new AudioSection(*this, host));
+    addSection(new SpeedSection(*this, host));
 
     m_listenerToken = m_doc.addListener([this](const Change& c) { onDocumentChange(c); });
 }
@@ -91,9 +94,12 @@ void InspectorPanel::rebuild() {
     }
     m_stack->setCurrentWidget(m_scroll);
     for (auto* s : m_sections) {
-        const bool show = s->appliesTo(primary->kind);
-        s->setVisible(show);
-        if (show) s->load(*primary, count);
+        // Shown when any selected clip is of a kind the section handles (a
+        // video clip with its linked audio selected gets the Audio section).
+        const Clip* target = nullptr;
+        for (auto id : m_selection) if (const Clip* c = seq.findClip(id); c && s->appliesTo(c->kind)) { target = c; break; }
+        s->setVisible(target != nullptr);
+        if (target) s->load(*target, count);
     }
 }
 
@@ -104,7 +110,10 @@ void InspectorPanel::reload() {
     int count = 0;
     for (auto id : m_selection) if (const Clip* c = seq.findClip(id)) { if (!primary) primary = c; ++count; }
     if (!primary) { rebuild(); return; }
-    for (auto* s : m_sections) if (s->isVisible()) s->load(*primary, count);
+    for (auto* s : m_sections) {
+        if (!s->isVisible()) continue;
+        for (auto id : m_selection) if (const Clip* c = seq.findClip(id); c && s->appliesTo(c->kind)) { s->load(*c, count); break; }
+    }
 }
 
 void InspectorPanel::onDocumentChange(const Change& change) {
@@ -145,6 +154,13 @@ void InspectorPanel::editSelection(const QString& undoText, int propertyId, cons
     m_applying = true;
     m_doc.push(std::make_unique<SequenceEditCommand>(m_doc, undoText.toStdString(), std::move(edit), mergeId));
     m_applying = false;
+}
+
+void InspectorPanel::pushEdit(const QString& undoText, const EditBuilder& build) {
+    SequenceEdit edit = build(m_doc, m_selection);
+    if (edit.empty()) return;
+    ++m_gestureSerial;
+    m_doc.push(std::make_unique<SequenceEditCommand>(m_doc, undoText.toStdString(), std::move(edit)));
 }
 
 void InspectorPanel::endGesture() {

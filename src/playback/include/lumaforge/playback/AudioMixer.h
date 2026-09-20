@@ -55,6 +55,7 @@ private:
     std::unordered_map<std::uint64_t, ClipReader> m_readers;   // by clipKey
     std::uint64_t m_generation = 0;
     std::vector<float> m_scratch;
+    std::vector<float> m_speedScratch;
     std::vector<AudioClipRequest> m_requests;
 };
 

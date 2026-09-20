@@ -433,6 +433,30 @@ SequenceEdit duplicateClips(Document& doc, const std::vector<ClipId>& ids) {
     return pasteClips(doc, source, TimePoint{latest}, PasteMode::Insert);
 }
 
+// ---------------------------------------------------------------- speed
+
+SequenceEdit setSpeed(Document& doc, const std::vector<ClipId>& ids, Rational speed) {
+    SequenceEdit edit;
+    if (!speed.isValid() || speed.num <= 0) return edit;
+    const auto& seq = doc.project().sequence;
+    const Duration frame = frameDuration(doc.project().settings.frameRate);
+    const auto all = withLinked(seq, ids);
+    Pieces pieces;
+    for (auto id : all) {
+        const Clip* c = seq.findClip(id);
+        if (!c || c->speed == speed) continue;
+        if (const Track* t = seq.findTrack(c->track); !t || t->locked) continue;
+        Clip n = *c;
+        const Duration source = c->sourceDuration();
+        n.speed = speed;
+        n.duration = std::max(frame, n.timelineDurationFor(source));
+        if (n.duration > c->duration) overwriteRangeImpl(doc, c->track, {c->end(), n.duration - c->duration}, all, edit, pieces);
+        edit.modify(std::move(n));
+    }
+    relinkPieces(seq, pieces, edit);
+    return edit;
+}
+
 // ---------------------------------------------------------------- helpers
 
 std::vector<Clip> applied(const Sequence& seq, const SequenceEdit& edit) { return effectiveClips(seq, edit); }

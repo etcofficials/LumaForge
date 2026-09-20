@@ -28,6 +28,7 @@ public:
     // InspectorContext
     void editSelection(const QString& undoText, int propertyId, const ClipEdit& fn) override;
     void endGesture() override;
+    void pushEdit(const QString& undoText, const EditBuilder& build) override;
     [[nodiscard]] const project::Project& project() const override { return m_doc.project(); }
 
 public slots:

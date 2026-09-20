@@ -2,6 +2,7 @@
 
 #include "lumaforge/media/MediaProbe.h"
 #include "lumaforge/media/Thumbnailer.h"
+#include "lumaforge/media/Waveform.h"
 
 #include <cmath>
 #include <string>
@@ -136,4 +137,17 @@ TEST_CASE("thumbnail: image and tall/short sources respect bounds") {
 TEST_CASE("thumbnail: audio-only file is rejected cleanly") {
     auto r = Thumbnailer::render(mediaPath("tone_44k.wav"));
     CHECK(!r.ok());
+}
+
+TEST_CASE("waveform: peaks cover the tone file and are silent outside it") {
+    auto w = lf::media::analyseWaveform(std::string(LF_TEST_MEDIA_DIR) + "/tone_44k.wav");
+    CHECK(w.ok());
+    if (!w) { std::printf("     %s\n", w.error().fullText().c_str()); return; }
+    CHECK(!w->empty());
+    const double seconds = w->duration().toSeconds();
+    CHECK(seconds > 0.5);
+    // The tone peaks at -18 dBFS (0.125 -> 32/255).
+    const int peak = w->peakBetween(lf::TimePoint::fromSeconds(0.1), lf::TimePoint::fromSeconds(0.2));
+    CHECK(peak > 24 && peak < 45);
+    CHECK(w->peakBetween(lf::TimePoint::fromSeconds(seconds + 1), lf::TimePoint::fromSeconds(seconds + 2)) == 0);
 }

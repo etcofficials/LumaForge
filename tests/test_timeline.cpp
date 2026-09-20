@@ -378,3 +378,32 @@ TEST_CASE("paste lands the earliest copy at the playhead and overwrites undernea
     doc.reset(p);
     CHECK(ops::pasteClips(doc, clipboard, sec(0)).empty());
 }
+
+TEST_CASE("speed: duration follows the source range, linked partner follows, growth overwrites") {
+    Document doc;
+    const MediaId a = addVideo(doc, "a.mp4", 4);
+    const ClipId v = place(doc, a, 0);
+    const ClipId next = place(doc, a, 4);      // [4,8)
+    auto& seq = doc.project().sequence;
+    doc.push(std::make_unique<SequenceEditCommand>(doc, "Speed", ops::setSpeed(doc, {v}, Rational{2, 1})));
+    CHECK(seq.findClip(v)->duration == dsec(2));
+    CHECK(seq.findClip(v)->sourceDuration() == dsec(4));
+    CHECK((seq.findClip(seq.findClip(v)->link)->speed == Rational{2, 1}));
+    CHECK(seq.findClip(next)->start == sec(4));         // untouched
+    // 50%: 4 s of media takes 8 s -> overwrites the first half of `next`
+    doc.push(std::make_unique<SequenceEditCommand>(doc, "Speed", ops::setSpeed(doc, {v}, Rational{1, 2})));
+    CHECK(seq.findClip(v)->duration == dsec(8));
+    CHECK(seq.findClip(next) == nullptr || seq.findClip(next)->start == sec(8));
+    doc.undoStack().undo();
+    doc.undoStack().undo();
+    CHECK(seq.findClip(v)->duration == dsec(4) && seq.findClip(next)->start == sec(4));
+    // Program maps time through the speed
+    doc.push(std::make_unique<SequenceEditCommand>(doc, "Speed", ops::setSpeed(doc, {v}, Rational{2, 1})));
+    playback::SequenceProgram prog(doc.project());
+    std::vector<playback::VideoLayerRequest> layers;
+    prog.videoLayersAt(sec(1), layers);
+    CHECK(layers.size() == 1 && layers[0].sourceTime == sec(2));
+    std::vector<playback::AudioClipRequest> audio;
+    prog.audioClipsAt(sec(1), audio);
+    CHECK(audio.size() == 1 && std::abs(audio[0].speed - 2.0) < 1e-9);
+}

@@ -70,8 +70,8 @@ MainWindow::MainWindow(std::shared_ptr<hw::GpuDevice> gpu, std::shared_ptr<log::
 
     QSettings settings;
     restoreGeometry(settings.value(QStringLiteral("window/geometry")).toByteArray());
-    if (settings.contains(QStringLiteral("window/mainSplitter"))) m_mainSplitter->restoreState(settings.value(QStringLiteral("window/mainSplitter")).toByteArray());
-    if (settings.contains(QStringLiteral("window/topSplitter"))) m_topSplitter->restoreState(settings.value(QStringLiteral("window/topSplitter")).toByteArray());
+    if (settings.contains(QStringLiteral("window/mainSplitter2"))) m_mainSplitter->restoreState(settings.value(QStringLiteral("window/mainSplitter2")).toByteArray());
+    if (settings.contains(QStringLiteral("window/topSplitter2"))) m_topSplitter->restoreState(settings.value(QStringLiteral("window/topSplitter2")).toByteArray());
 
     // The preview surface belongs to the playback engine's render thread.
     m_previewPanel->surface()->setEngine(m_playback->engine(), m_gpu);
@@ -217,7 +217,7 @@ void MainWindow::buildCentralLayout() {
     m_topSplitter->setStretchFactor(0, 0);
     m_topSplitter->setStretchFactor(1, 1);
     m_topSplitter->setStretchFactor(2, 0);
-    m_topSplitter->setSizes({300, 860, 260});
+    m_topSplitter->setSizes({280, 820, 340});
 
     m_mainSplitter = new QSplitter(Qt::Vertical, this);
     m_mainSplitter->setChildrenCollapsible(false);
@@ -533,8 +533,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     }
     QSettings settings;
     settings.setValue(QStringLiteral("window/geometry"), saveGeometry());
-    settings.setValue(QStringLiteral("window/mainSplitter"), m_mainSplitter->saveState());
-    settings.setValue(QStringLiteral("window/topSplitter"), m_topSplitter->saveState());
+    settings.setValue(QStringLiteral("window/mainSplitter2"), m_mainSplitter->saveState());
+    settings.setValue(QStringLiteral("window/topSplitter2"), m_topSplitter->saveState());
     // Stop presentation before Qt tears the native window down.
     m_playback->pause();
     QMainWindow::closeEvent(event);

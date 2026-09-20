@@ -68,6 +68,11 @@ SequenceEdit duplicateClips(Document& doc, const std::vector<ClipId>& ids);
 // Fresh copies (new ids, links remapped among the copies) shifted by `delta`.
 std::vector<Clip> cloneClips(Document& doc, const std::vector<Clip>& source, Duration delta);
 
+// Changes playback speed (num/den > 0) of the clips and their linked partners.
+// The clip keeps its start and sourceIn; its timeline duration follows the
+// same source range at the new speed, overwriting neighbours when it grows.
+SequenceEdit setSpeed(Document& doc, const std::vector<ClipId>& ids, Rational speed);
+
 // Clip ids plus their linked partners (deduplicated).
 std::vector<ClipId> withLinked(const Sequence& seq, const std::vector<ClipId>& ids);
 

@@ -1,6 +1,9 @@
 #include "ui/timeline/TimelineView.h"
 
+#include "lumaforge/core/Log.h"
+#include "lumaforge/playback/SequenceProgram.h"
 #include "lumaforge/project/TimelineOps.h"
+#include "ui/media/WaveformService.h"
 #include "ui/Theme.h"
 #include "ui/Timecode.h"
 #include "ui/media/ImportController.h"
@@ -66,6 +69,11 @@ TimelineView::TimelineView(Document& doc, QWidget* parent) : QWidget(parent), m_
 }
 
 TimelineView::~TimelineView() { m_doc.removeListener(m_listenerToken); }
+
+void TimelineView::setWaveformService(WaveformService* service) {
+    m_waveforms = service;
+    if (service) connect(service, &WaveformService::ready, this, [this](project::MediaId) { update(laneArea()); });
+}
 
 // ---------------------------------------------------------------- model sync
 
@@ -747,14 +755,11 @@ void TimelineView::finishGesture(bool commitEdit) {
 }
 
 void TimelineView::mouseDoubleClickEvent(QMouseEvent* e) {
-    const Hit hit = hitTest(e->position().toPoint());
-    if (e->button() == Qt::LeftButton && isValid(hit.clip) && m_tool == EditTool::Select) {
-        emit clipDoubleClicked(hit.clip);
-        e->accept();
-        return;
-    }
-    // Empty space / blade: a fast second press behaves like any other press.
+    // A fast second press behaves like any other press (select / blade / seek)...
     mousePressEvent(e);
+    // ...and a double-click on a clip additionally announces it.
+    const Hit hit = hitTest(e->position().toPoint());
+    if (e->button() == Qt::LeftButton && isValid(hit.clip) && m_tool == EditTool::Select) emit clipDoubleClicked(hit.clip);
 }
 
 void TimelineView::keyPressEvent(QKeyEvent* e) {
@@ -1168,16 +1173,33 @@ void TimelineView::paintClip(QPainter& p, const Clip& c, const QRectF& r, bool s
     QColor strip = base.lighter(selected ? 130 : 110);
     strip.setAlpha(alpha);
     p.fillRect(QRectF(r.left(), r.top(), r.width(), 4), strip);
-    // Audio: a schematic waveform placeholder until real peaks arrive.
+    // Audio: real peak envelope (analysed in the background), one column per pixel.
     if (c.kind == ClipKind::Audio && r.width() > 10) {
-        QColor wave = base.lighter(150);
-        wave.setAlpha(alpha / 3);
+        std::shared_ptr<const media::Waveform> wave;
+        if (m_waveforms) {
+            if (const MediaItem* item = m_doc.project().findMedia(c.media); item && !item->offline) wave = m_waveforms->peaksFor(c.media, QString::fromStdString(item->path));
+        }
+        QColor col = base.lighter(160);
+        col.setAlpha(std::min(255, alpha / 2 + 40));
         const double mid = r.top() + 4 + (r.height() - 4) / 2.0;
-        p.setPen(QPen(wave, 1));
-        const double amp = (r.height() - 8) / 2.0 * 0.6;
-        for (double x = r.left() + 2; x < r.right() - 1; x += 3) {
-            const double h = amp * (0.35 + 0.65 * std::fabs(std::sin(x * 0.37) * std::cos(x * 0.11)));
-            p.drawLine(QPointF(x, mid - h), QPointF(x, mid + h));
+        const double amp = (r.height() - 10) / 2.0;
+        p.setPen(QPen(col, 1));
+        const double x0 = std::max(r.left() + 1, static_cast<double>(headerWidth()));
+        const double x1 = std::min(r.right() - 1, static_cast<double>(width()));
+        if (wave && !wave->empty()) {
+            // Gain (volume + fades + mute) shapes the envelope so the user sees what they hear.
+            for (double x = x0; x < x1; x += 1.0) {
+                const TimePoint t0{ticksFromX(x)}, t1{ticksFromX(x + 1.0)};
+                const TimePoint s0 = c.sourceTimeAt(t0), s1 = c.sourceTimeAt(t1);
+                const float peak = wave->peakBetween(s0, std::max(s1, TimePoint{s0.ticks + 1})) / 255.0f;
+                const float gain = std::min(1.0f, playback::SequenceProgram::gainAt(c, t0));
+                // Perceptual-ish scale: quiet material (-20 dBFS) still reads as a waveform.
+                const double h = std::max(0.5, amp * std::pow(static_cast<double>(peak * gain), 0.55));
+                p.drawLine(QPointF(x + 0.5, mid - h), QPointF(x + 0.5, mid + h));
+            }
+        } else {
+            // Not analysed yet: a quiet centre line.
+            p.drawLine(QPointF(x0, mid), QPointF(x1, mid));
         }
     }
     p.restore();

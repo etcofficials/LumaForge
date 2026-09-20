@@ -14,6 +14,7 @@ qt_add_library(lf_ui STATIC
     inspector/ColorSection.h inspector/ColorSection.cpp
     inspector/EffectsSection.h inspector/EffectsSection.cpp
     inspector/TextSections.h inspector/TextSections.cpp
+    inspector/AudioSection.h inspector/AudioSection.cpp
     widgets/ColorButton.h   widgets/ColorButton.cpp
     panels/MediaPanel.h     panels/MediaPanel.cpp
     panels/InspectorPanel.h panels/InspectorPanel.cpp
@@ -29,6 +30,7 @@ qt_add_library(lf_ui STATIC
     media/MediaTileDelegate.h media/MediaTileDelegate.cpp
     media/ThumbnailService.h media/ThumbnailService.cpp
     media/ImportController.h media/ImportController.cpp
+    media/WaveformService.h media/WaveformService.cpp
     playback/PlaybackController.h playback/PlaybackController.cpp
 )
 add_library(lumaforge::ui ALIAS lf_ui)

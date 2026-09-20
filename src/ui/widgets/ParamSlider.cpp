@@ -25,7 +25,7 @@ ParamSlider::ParamSlider(double min, double max, double defaultValue, int decima
     m_slider = new QSlider(Qt::Horizontal, this);
     m_slider->setRange(0, kSliderSteps);
     m_slider->setFocusPolicy(Qt::NoFocus);   // arrow keys stay with the transport
-    m_slider->setMinimumWidth(80);
+    m_slider->setMinimumWidth(50);
     row->addWidget(m_slider, 1);
 
     m_spin = new QDoubleSpinBox(this);
@@ -35,7 +35,7 @@ ParamSlider::ParamSlider(double min, double max, double defaultValue, int decima
     m_spin->setKeyboardTracking(false);
     m_spin->setButtonSymbols(QAbstractSpinBox::NoButtons);
     m_spin->setAlignment(Qt::AlignRight);
-    m_spin->setFixedWidth(64);
+    m_spin->setFixedWidth(60);
     row->addWidget(m_spin);
 
     m_reset = new QToolButton(this);
