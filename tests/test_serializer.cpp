@@ -44,9 +44,11 @@ Project sampleProject() {
     doc.push(std::make_unique<ImportMediaCommand>(doc, std::vector<MediaItem>{m}));
     auto clips = ops::clipsForMedia(doc, m, ops::defaultPlacement(doc.project(), m, TimePoint::zero()));
     clips[0].transform.positionX = 12.5f;
-    clips[0].transform.scale = 0.75f;
+    clips[0].transform.scaleX = 0.75f;
+    clips[0].transform.flipH = true;
     clips[0].color.saturation = 1.3f;
-    clips[0].effects.grayscale = true;
+    clips[0].effects.push_back(makeEffect(EffectType::Grayscale));
+    { Effect b = makeEffect(EffectType::Blur); b.amount = 12; b.enabled = false; clips[0].effects.push_back(b); }
     clips[0].speed = Rational{3, 2};
     clips[0].duration = Duration::fromSeconds(4);
     clips[1].audio.volume = 0.5f;

@@ -6,7 +6,9 @@ add_library(lf_core STATIC
     include/lumaforge/core/Result.h
     include/lumaforge/core/Log.h
     include/lumaforge/core/StringUtil.h
+    include/lumaforge/core/VisualParams.h
     src/Log.cpp
+    src/VisualParams.cpp
     src/StringUtil.cpp
 )
 add_library(lumaforge::core ALIAS lf_core)

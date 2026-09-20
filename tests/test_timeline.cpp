@@ -321,14 +321,14 @@ TEST_CASE("duplicate places copies right after the group, links remapped, proper
     const MediaId a = addVideo(doc, "a.mp4", 4);
     const ClipId v = place(doc, a, 1);
     auto& seq = doc.project().sequence;
-    seq.findClip(v)->transform.scale = 0.5f;
+    seq.findClip(v)->transform.scaleX = 0.5f;
     seq.findClip(v)->color.saturation = 1.5f;
     const ClipId au = seq.findClip(v)->link;
     doc.push(std::make_unique<SequenceEditCommand>(doc, "Duplicate", ops::duplicateClips(doc, ops::withLinked(seq, {v}))));
     CHECK(seq.clips.size() == 4);
     const Clip* copy = seq.clipAt(V1(doc), sec(6));
     CHECK(copy && copy->start == sec(5) && copy->duration == dsec(4));
-    CHECK(copy->id != v && copy->transform.scale == 0.5f && copy->color.saturation == 1.5f && copy->media == a);
+    CHECK(copy->id != v && copy->transform.scaleX == 0.5f && copy->color.saturation == 1.5f && copy->media == a);
     const Clip* copyAudio = seq.findClip(copy->link);
     CHECK(copyAudio && copyAudio->kind == ClipKind::Audio && copyAudio->link == copy->id && copyAudio->id != au);
     doc.undoStack().undo();

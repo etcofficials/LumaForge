@@ -10,6 +10,9 @@ qt_add_library(lf_ui STATIC
     widgets/ParamSlider.h   widgets/ParamSlider.cpp
     inspector/InspectorSection.h
     inspector/ClipInfoSection.h inspector/ClipInfoSection.cpp
+    inspector/TransformSection.h inspector/TransformSection.cpp
+    inspector/ColorSection.h inspector/ColorSection.cpp
+    inspector/EffectsSection.h inspector/EffectsSection.cpp
     panels/MediaPanel.h     panels/MediaPanel.cpp
     panels/InspectorPanel.h panels/InspectorPanel.cpp
     preview/PreviewWidget.h preview/PreviewWidget.cpp

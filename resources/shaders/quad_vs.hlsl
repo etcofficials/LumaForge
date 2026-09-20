@@ -9,8 +9,9 @@ cbuffer LayerConstants : register(b0) {
     float4   adjust0;     // opacity, exposure, brightness, contrast
     float4   adjust1;     // saturation, temperature, tint, highlights
     float4   adjust2;     // shadows, gamma, vibrance, hue (degrees)
-    int4     mode;        // planeMode, flags, unused, unused
+    int4     mode;        // planeMode, flags, flipBits, unused
     float4   misc;        // vignetteAmount, texelW, texelH, unused
+    float4   fx;          // grayscale, sepia, blur, sharpen
 };
 
 struct VSOut {
@@ -25,6 +26,8 @@ VSOut main(uint id : SV_VertexID) {
     o.pos = mul(transform, float4(corner, 0.0, 1.0));
     float2 t = corner * 0.5 + 0.5;          // 0..1
     t.y = 1.0 - t.y;                        // texture origin is top-left
+    if (mode.z & 1) t.x = 1.0 - t.x;        // flip horizontal
+    if (mode.z & 2) t.y = 1.0 - t.y;        // flip vertical
     o.uv = lerp(uvRect.xy, uvRect.zw, t);
     return o;
 }

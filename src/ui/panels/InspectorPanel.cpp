@@ -2,6 +2,9 @@
 
 #include "lumaforge/project/TimelineCommands.h"
 #include "ui/inspector/ClipInfoSection.h"
+#include "ui/inspector/TransformSection.h"
+#include "ui/inspector/ColorSection.h"
+#include "ui/inspector/EffectsSection.h"
 #include "ui/widgets/EmptyState.h"
 #include "ui/widgets/PanelHeader.h"
 
@@ -45,6 +48,10 @@ InspectorPanel::InspectorPanel(Document& doc, QWidget* parent) : QWidget(parent)
     layout->addWidget(m_stack, 1);
 
     addSection(new ClipInfoSection(*this, host));
+    addSection(new TransformSection(*this, host));
+    addSection(new CropSection(*this, host));
+    addSection(new ColorSection(*this, host));
+    addSection(new EffectsSection(*this, host));
 
     m_listenerToken = m_doc.addListener([this](const Change& c) { onDocumentChange(c); });
 }
@@ -133,6 +140,9 @@ void InspectorPanel::editSelection(const QString& undoText, int propertyId, cons
     m_applying = false;
 }
 
-void InspectorPanel::endGesture() { ++m_gestureSerial; }
+void InspectorPanel::endGesture() {
+    ++m_gestureSerial;
+    reload();   // widgets show the model (e.g. clamped values) once the gesture is over
+}
 
 }  // namespace lf::ui

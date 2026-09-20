@@ -64,7 +64,7 @@ void SequenceProgram::videoLayersAt(TimePoint t, std::vector<VideoLayerRequest>&
             r.transform = e.clip.transform;
             r.crop = e.clip.crop;
             r.color = e.clip.color;
-            r.effects = e.clip.effects;
+            applyEffects(e.clip.effects, r.color, r.effects);
             r.fitToFrame = true;
             if (e.clip.kind == ClipKind::Text) r.text = e.clip.text;
             out.push_back(std::move(r));

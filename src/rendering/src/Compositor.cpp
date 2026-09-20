@@ -29,6 +29,7 @@ struct alignas(16) LayerConstants {
     float adjust2[4];
     std::int32_t mode[4];
     float misc[4];
+    float fx[4];          // grayscale mix, sepia mix, blur radius (texels), sharpen amount
 };
 static_assert(sizeof(LayerConstants) % 16 == 0);
 
@@ -190,12 +191,13 @@ void Compositor::drawLayer(const Layer& layer, int frameW, int frameH, int targe
     if (cropW <= 0.0f || cropH <= 0.0f || layer.transform.opacity <= 0.0f) return;
     float base = 1.0f;
     if (layer.fitToFrame) base = std::min(static_cast<float>(frameW) / tex.width(), static_cast<float>(frameH) / tex.height());
-    const float scale = base * layer.transform.scale;
-    const float halfW = tex.width() * cropW * scale * 0.5f;
-    const float halfH = tex.height() * cropH * scale * 0.5f;
+    const float scaleX = base * layer.transform.scaleX;
+    const float scaleY = base * layer.transform.scaleY;
+    const float halfW = tex.width() * cropW * scaleX * 0.5f;
+    const float halfH = tex.height() * cropH * scaleY * 0.5f;
     // Crop shifts the visible centre: account for asymmetric crops.
-    const float cropCx = (layer.crop.left - layer.crop.right) * 0.5f * tex.width() * scale;
-    const float cropCy = (layer.crop.top - layer.crop.bottom) * 0.5f * tex.height() * scale;
+    const float cropCx = (layer.crop.left - layer.crop.right) * 0.5f * tex.width() * scaleX;
+    const float cropCy = (layer.crop.top - layer.crop.bottom) * 0.5f * tex.height() * scaleY;
 
     // Quad corner (cx, cy) in {-1,1}^2, cy = +1 is the image top.
     //   local (frame px, y down) = (cx * halfW, -cy * halfH)
@@ -232,14 +234,22 @@ void Compositor::drawLayer(const Layer& layer, int frameW, int frameH, int targe
         case FrameTexture::Kind::I420: planeMode = 1; break;
         case FrameTexture::Kind::Bgra: planeMode = 2; break;
     }
+    const EffectParams& fx = layer.effects;
     int flags = 0;
-    if (layer.effects.grayscale) flags |= 1;
-    if (layer.effects.sepia) flags |= 2;
-    if (layer.effects.vignette > 0.0f) flags |= 4;
+    if (fx.grayscale > 0.0f) flags |= 1;
+    if (fx.sepia > 0.0f) flags |= 2;
+    if (fx.vignette > 0.0f) flags |= 4;
     if (tex.isPremultiplied()) flags |= 8;
-    if (ca.isIdentity() && !layer.effects.grayscale && !layer.effects.sepia && layer.effects.vignette <= 0.0f) flags |= 16;
+    if (ca.isIdentity() && fx.isIdentity()) flags |= 16;
+    if (fx.blur > 0.0f) flags |= 32;
+    if (fx.sharpen > 0.0f) flags |= 64;
+    k.fx[0] = fx.grayscale;
+    k.fx[1] = fx.sepia;
+    k.fx[2] = fx.blur;      // in source texels; the shader scales by texel size
+    k.fx[3] = fx.sharpen;
     k.mode[0] = planeMode;
     k.mode[1] = flags;
+    k.mode[2] = (layer.transform.flipH ? 1 : 0) | (layer.transform.flipV ? 2 : 0);
     k.misc[0] = layer.effects.vignette;
     k.misc[1] = 1.0f / tex.width();
     k.misc[2] = 1.0f / tex.height();

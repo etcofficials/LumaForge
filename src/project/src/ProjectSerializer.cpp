@@ -28,7 +28,8 @@ json rational(Rational r) { return json::array({r.num, r.den}); }
 json color(const ColorRgba& c) { return json::array({c.r, c.g, c.b, c.a}); }
 
 json write(const Transform2D& t) {
-    return {{"positionX", t.positionX}, {"positionY", t.positionY}, {"scale", t.scale}, {"rotation", t.rotation}, {"opacity", t.opacity}};
+    return {{"positionX", t.positionX}, {"positionY", t.positionY}, {"scaleX", t.scaleX}, {"scaleY", t.scaleY}, {"rotation", t.rotation},
+            {"opacity", t.opacity}, {"flipH", t.flipH}, {"flipV", t.flipV}};
 }
 json write(const Crop& c) { return {{"left", c.left}, {"right", c.right}, {"top", c.top}, {"bottom", c.bottom}}; }
 json write(const ColorAdjust& c) {
@@ -36,8 +37,10 @@ json write(const ColorAdjust& c) {
             {"temperature", c.temperature}, {"tint", c.tint}, {"highlights", c.highlights}, {"shadows", c.shadows},
             {"gamma", c.gamma}, {"vibrance", c.vibrance}, {"hue", c.hue}};
 }
-json write(const EffectParams& e) {
-    return {{"grayscale", e.grayscale}, {"sepia", e.sepia}, {"vignette", e.vignette}, {"blur", e.blur}, {"sharpen", e.sharpen}};
+json write(const std::vector<Effect>& effects) {
+    json arr = json::array();
+    for (const Effect& e : effects) arr.push_back({{"type", effectInfo(e.type).id}, {"enabled", e.enabled}, {"amount", e.amount}});
+    return arr;
 }
 json write(const AudioParams& a) {
     return {{"volume", a.volume}, {"muted", a.muted}, {"fadeIn", a.fadeIn.ticks}, {"fadeOut", a.fadeOut.ticks}};
@@ -115,7 +118,12 @@ template <typename Id>
 void getId(const json& j, const char* key, Id& out) { std::uint64_t v = raw(out); get(j, key, v); out = static_cast<Id>(v); }
 
 void read(const json& j, Transform2D& t) {
-    get(j, "positionX", t.positionX); get(j, "positionY", t.positionY); get(j, "scale", t.scale); get(j, "rotation", t.rotation); get(j, "opacity", t.opacity);
+    get(j, "positionX", t.positionX); get(j, "positionY", t.positionY);
+    float legacyScale = 1.0f;   // v1 files stored one uniform scale
+    get(j, "scale", legacyScale);
+    t.scaleX = t.scaleY = legacyScale;
+    get(j, "scaleX", t.scaleX); get(j, "scaleY", t.scaleY);
+    get(j, "rotation", t.rotation); get(j, "opacity", t.opacity); get(j, "flipH", t.flipH); get(j, "flipV", t.flipV);
 }
 void read(const json& j, Crop& c) { get(j, "left", c.left); get(j, "right", c.right); get(j, "top", c.top); get(j, "bottom", c.bottom); }
 void read(const json& j, ColorAdjust& c) {
@@ -123,7 +131,32 @@ void read(const json& j, ColorAdjust& c) {
     get(j, "temperature", c.temperature); get(j, "tint", c.tint); get(j, "highlights", c.highlights); get(j, "shadows", c.shadows);
     get(j, "gamma", c.gamma); get(j, "vibrance", c.vibrance); get(j, "hue", c.hue);
 }
-void read(const json& j, EffectParams& e) { get(j, "grayscale", e.grayscale); get(j, "sepia", e.sepia); get(j, "vignette", e.vignette); get(j, "blur", e.blur); get(j, "sharpen", e.sharpen); }
+void read(const json& j, std::vector<Effect>& effects) {
+    effects.clear();
+    if (j.is_array()) {
+        for (const auto& item : j) {
+            std::string id;
+            get(item, "type", id);
+            const EffectType type = effectTypeFromId(id);
+            if (type == EffectType::Count) continue;   // unknown effect from a newer version: dropped, not fatal
+            Effect e = makeEffect(type);
+            get(item, "enabled", e.enabled);
+            get(item, "amount", e.amount);
+            effects.push_back(e);
+        }
+        return;
+    }
+    if (!j.is_object()) return;
+    // v1: a fixed struct {grayscale, sepia, vignette, blur, sharpen}
+    bool grayscale = false, sepia = false;
+    float vignette = 0, blur = 0, sharpen = 0;
+    get(j, "grayscale", grayscale); get(j, "sepia", sepia); get(j, "vignette", vignette); get(j, "blur", blur); get(j, "sharpen", sharpen);
+    if (grayscale) effects.push_back(makeEffect(EffectType::Grayscale));
+    if (sepia) effects.push_back(makeEffect(EffectType::Sepia));
+    if (blur > 0) { Effect e = makeEffect(EffectType::Blur); e.amount = blur; effects.push_back(e); }
+    if (sharpen > 0) { Effect e = makeEffect(EffectType::Sharpen); e.amount = sharpen; effects.push_back(e); }
+    if (vignette > 0) { Effect e = makeEffect(EffectType::Vignette); e.amount = vignette; effects.push_back(e); }
+}
 void read(const json& j, AudioParams& a) { get(j, "volume", a.volume); get(j, "muted", a.muted); getTicks(j, "fadeIn", a.fadeIn); getTicks(j, "fadeOut", a.fadeOut); }
 void read(const json& j, TextParams& t) {
     get(j, "text", t.text); get(j, "fontFamily", t.fontFamily); get(j, "fontSize", t.fontSize); get(j, "bold", t.bold); get(j, "italic", t.italic);

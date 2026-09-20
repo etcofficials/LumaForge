@@ -149,7 +149,7 @@ TEST_CASE("compositor: opacity and grayscale are applied") {
 
     Layer grey;
     grey.texture = *tex;
-    grey.effects.grayscale = true;
+    grey.effects.grayscale = 1.0f;
     Layer l2[] = {grey};
     (*comp)->compose(**target, 64, 64, l2, Rgba{0, 0, 0, 1});
     (*comp)->readback(**target, out);

@@ -51,7 +51,7 @@ struct Clip {
     Transform2D transform;
     Crop crop;
     ColorAdjust color;
-    EffectParams effects;
+    std::vector<Effect> effects;   // ordered; see applyEffects()
     AudioParams audio;
     TextParams text;
 

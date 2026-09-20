@@ -11,8 +11,10 @@ cbuffer LayerConstants : register(b0) {
     float4   adjust1;     // saturation, temperature, tint, highlights
     float4   adjust2;     // shadows, gamma, vibrance, hue
     int4     mode;        // x: 0 = NV12 (t0=Y R8, t1=UV RG8), 1 = I420 (t0,t1,t2 R8), 2 = BGRA (t0)
-                          // y: flags  1 grayscale, 2 sepia, 4 vignette, 8 input premultiplied, 16 skip colour math
+                          // y: flags  1 grayscale, 2 sepia, 4 vignette, 8 input premultiplied, 16 skip colour math,
+                          //           32 blur, 64 sharpen        z: 1 flip H, 2 flip V
     float4   misc;        // vignetteAmount, texelW, texelH
+    float4   fx;          // grayscale mix, sepia mix, blur radius (texels), sharpen amount
 };
 
 Texture2D tex0 : register(t0);
@@ -30,27 +32,60 @@ float3 hueRotate(float3 c, float degrees) {
     return c * cs + cross(k, c) * sn + k * dot(k, c) * (1.0 - cs);
 }
 
-float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
-    // Outside the crop rectangle: transparent.
-    if (uv.x < uvRect.x || uv.x > uvRect.z || uv.y < uvRect.y || uv.y > uvRect.w) return float4(0, 0, 0, 0);
-
-    float3 rgb;
-    float alpha = 1.0;
+// Straight (un-premultiplied) RGB + alpha of the source at uv, whatever the plane layout.
+float4 sampleSource(float2 uv) {
     int planeMode = mode.x;
     int flags = mode.y;
     if (planeMode == 2) {
         float4 c = tex0.Sample(linearClamp, uv);
-        alpha = c.a;
-        rgb = (flags & 8) ? (alpha > 0.0 ? c.rgb / alpha : c.rgb) : c.rgb;   // un-premultiply for colour math
-    } else {
-        float y = tex0.Sample(linearClamp, uv).r;
-        float2 cbcr;
-        if (planeMode == 0) cbcr = tex1.Sample(linearClamp, uv).rg;
-        else cbcr = float2(tex1.Sample(linearClamp, uv).r, tex2.Sample(linearClamp, uv).r);
-        float3 ycc = float3(y, cbcr.x, cbcr.y);
-        rgb.r = dot(csRow0.xyz, ycc) + csRow0.w;
-        rgb.g = dot(csRow1.xyz, ycc) + csRow1.w;
-        rgb.b = dot(csRow2.xyz, ycc) + csRow2.w;
+        float3 rgb = (flags & 8) ? (c.a > 0.0 ? c.rgb / c.a : c.rgb) : c.rgb;
+        return float4(rgb, c.a);
+    }
+    float y = tex0.Sample(linearClamp, uv).r;
+    float2 cbcr;
+    if (planeMode == 0) cbcr = tex1.Sample(linearClamp, uv).rg;
+    else cbcr = float2(tex1.Sample(linearClamp, uv).r, tex2.Sample(linearClamp, uv).r);
+    float3 ycc = float3(y, cbcr.x, cbcr.y);
+    float3 rgb;
+    rgb.r = dot(csRow0.xyz, ycc) + csRow0.w;
+    rgb.g = dot(csRow1.xyz, ycc) + csRow1.w;
+    rgb.b = dot(csRow2.xyz, ycc) + csRow2.w;
+    return float4(rgb, 1.0);
+}
+
+// 12-tap Poisson disk: one pass, radius in texels. Cheap enough for the
+// target GPU at preview sizes; large radii trade smoothness for speed.
+static const float2 kDisk[12] = {
+    float2(-0.326, -0.406), float2(-0.840, -0.074), float2(-0.696,  0.457), float2(-0.203,  0.621),
+    float2( 0.962, -0.195), float2( 0.473, -0.480), float2( 0.519,  0.767), float2( 0.185, -0.893),
+    float2( 0.507,  0.064), float2( 0.896,  0.412), float2(-0.322, -0.933), float2(-0.792, -0.598)
+};
+
+float4 blurred(float2 uv, float radius) {
+    float2 texel = misc.yz;
+    float2 lo = uvRect.xy, hi = uvRect.zw;
+    float4 acc = sampleSource(uv);
+    [unroll] for (int i = 0; i < 12; ++i) {
+        float2 p = clamp(uv + kDisk[i] * radius * texel, lo, hi);
+        acc += sampleSource(p);
+    }
+    return acc / 13.0;
+}
+
+float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
+    // Outside the crop rectangle: transparent.
+    if (uv.x < uvRect.x || uv.x > uvRect.z || uv.y < uvRect.y || uv.y > uvRect.w) return float4(0, 0, 0, 0);
+
+    int flags = mode.y;
+    float4 src = (flags & 32) ? blurred(uv, fx.z) : sampleSource(uv);
+    float3 rgb = src.rgb;
+    float alpha = src.a;
+    if (flags & 64) {
+        // Unsharp mask against a 4-tap cross average.
+        float2 t = misc.yz * 1.5;
+        float3 around = (sampleSource(uv + float2(t.x, 0)).rgb + sampleSource(uv - float2(t.x, 0)).rgb +
+                         sampleSource(uv + float2(0, t.y)).rgb + sampleSource(uv - float2(0, t.y)).rgb) * 0.25;
+        rgb = saturate(rgb + (rgb - around) * fx.w * 2.0);
     }
 
     if (!(flags & 16)) {
@@ -89,10 +124,10 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
         if (hue != 0.0) rgb = hueRotate(rgb, hue);
         rgb = saturate(rgb);
 
-        if (flags & 1) { float g = dot(rgb, kLuma); rgb = float3(g, g, g); }
+        if (flags & 1) { float g = dot(rgb, kLuma); rgb = lerp(rgb, float3(g, g, g), fx.x); }
         if (flags & 2) {
             float3 s = float3(dot(rgb, float3(0.393, 0.769, 0.189)), dot(rgb, float3(0.349, 0.686, 0.168)), dot(rgb, float3(0.272, 0.534, 0.131)));
-            rgb = saturate(s);
+            rgb = lerp(rgb, saturate(s), fx.y);
         }
         if (flags & 4) {
             float2 d = (uv - 0.5) * 2.0;
