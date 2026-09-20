@@ -359,6 +359,80 @@ SequenceEdit removeClips(Document& doc, const std::vector<ClipId>& ids, bool rip
     return edit;
 }
 
+// ---------------------------------------------------------------- copy / paste / duplicate
+
+std::vector<Clip> cloneClips(Document& doc, const std::vector<Clip>& source, Duration delta) {
+    std::vector<Clip> out;
+    std::map<ClipId, ClipId> remap;
+    for (const Clip& c : source) {
+        Clip n = c;
+        n.id = doc.allocateClipId();
+        n.start = c.start + delta;
+        remap[c.id] = n.id;
+        out.push_back(std::move(n));
+    }
+    for (Clip& n : out) {
+        auto it = remap.find(n.link);
+        n.link = it == remap.end() ? ClipId::Invalid : it->second;
+    }
+    return out;
+}
+
+SequenceEdit pasteClips(Document& doc, const std::vector<Clip>& source, TimePoint at, PasteMode mode) {
+    std::vector<Clip> valid;
+    const auto& seq = doc.project().sequence;
+    for (const Clip& c : source) {
+        const Track* t = seq.findTrack(c.track);
+        if (!t || t->locked) continue;
+        if (c.kind != ClipKind::Text && !doc.project().findMedia(c.media)) continue;
+        valid.push_back(c);
+    }
+    if (valid.empty()) return {};
+    Ticks earliest = valid.front().start.ticks, latest = valid.front().end().ticks;
+    for (const Clip& c : valid) { earliest = std::min(earliest, c.start.ticks); latest = std::max(latest, c.end().ticks); }
+    const TimePoint target{std::max<Ticks>(0, at.ticks)};
+    const Duration delta = target - TimePoint{earliest};
+    std::vector<Clip> copies = cloneClips(doc, valid, delta);
+    if (mode == PasteMode::Overwrite) return insertClips(doc, std::move(copies));
+
+    // Insert: open a gap of the group's span on every destination track. A
+    // clip straddling the insertion point is split so its tail moves too.
+    const Duration span{latest - earliest};
+    SequenceEdit edit;
+    std::vector<TrackId> tracks;
+    for (const Clip& c : copies) if (std::find(tracks.begin(), tracks.end(), c.track) == tracks.end()) tracks.push_back(c.track);
+    Pieces pieces;
+    for (TrackId track : tracks) {
+        for (const Clip& c : effectiveClips(seq, edit)) {
+            if (c.track != track) continue;
+            if (c.start >= target) {
+                Clip m = c;
+                m.start = c.start + span;
+                edit.modify(std::move(m));
+            } else if (c.end() > target) {
+                Clip right = rightPiece(c, target, doc.allocateClipId());
+                right.start = target + span;
+                edit.modify(leftPiece(c, target));
+                pieces.emplace_back(c.id, right.id);
+                edit.add(std::move(right));
+            }
+        }
+    }
+    relinkPieces(seq, pieces, edit);
+    for (Clip& c : copies) edit.add(std::move(c));
+    return edit;
+}
+
+SequenceEdit duplicateClips(Document& doc, const std::vector<ClipId>& ids) {
+    const auto& seq = doc.project().sequence;
+    std::vector<Clip> source;
+    for (auto id : ids) if (const Clip* c = seq.findClip(id)) source.push_back(*c);
+    if (source.empty()) return {};
+    Ticks latest = source.front().end().ticks;
+    for (const Clip& c : source) latest = std::max(latest, c.end().ticks);
+    return pasteClips(doc, source, TimePoint{latest}, PasteMode::Insert);
+}
+
 // ---------------------------------------------------------------- helpers
 
 std::vector<Clip> applied(const Sequence& seq, const SequenceEdit& edit) { return effectiveClips(seq, edit); }

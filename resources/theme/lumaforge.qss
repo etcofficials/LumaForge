@@ -140,6 +140,15 @@ QLabel[panelTitle="true"] {
     letter-spacing: 0.4px;
     padding-left: 10px;
 }
+QWidget[sectionHeader="true"] {
+    background: {{bg.header}};
+    border-top: 1px solid {{border}};
+    border-bottom: 1px solid {{border}};
+}
+QToolButton[sectionToggle="true"] { color: {{text.secondary}}; padding: 0 4px; border: none; }
+QToolButton[sectionToggle="true"]:hover { color: {{text.primary}}; background: transparent; }
+QToolButton[sectionButton="true"] { color: {{text.muted}}; padding: 0 6px; border: none; }
+QToolButton[sectionButton="true"]:hover { color: {{text.primary}}; background: {{bg.hover}}; }
 QLabel[muted="true"] { color: {{text.muted}}; }
 QLabel[secondary="true"] { color: {{text.secondary}}; }
 QLabel[timecode="true"] {

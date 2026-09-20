@@ -131,10 +131,18 @@ void MainWindow::buildMenus() {
     edit->addAction(m_actions->action(ActionId::EditUndo));
     edit->addAction(m_actions->action(ActionId::EditRedo));
     edit->addSeparator();
+    edit->addAction(m_actions->action(ActionId::EditCopy));
+    edit->addAction(m_actions->action(ActionId::EditPaste));
+    edit->addAction(m_actions->action(ActionId::EditDuplicate));
+    edit->addSeparator();
     edit->addAction(m_actions->action(ActionId::ClipSplit));
     edit->addAction(m_actions->action(ActionId::ClipDelete));
+    edit->addAction(m_actions->action(ActionId::ClipRippleDelete));
     edit->addSeparator();
     edit->addAction(m_actions->action(ActionId::ClipSelectAll));
+    edit->addSeparator();
+    edit->addAction(m_actions->action(ActionId::ToolSelect));
+    edit->addAction(m_actions->action(ActionId::ToolBlade));
 
     auto* playback = menuBar()->addMenu(tr("&Playback"));
     playback->addAction(m_actions->action(ActionId::PlayPause));
@@ -144,6 +152,9 @@ void MainWindow::buildMenus() {
     playback->addAction(m_actions->action(ActionId::StepForward));
     playback->addAction(m_actions->action(ActionId::GoToStart));
     playback->addAction(m_actions->action(ActionId::GoToEnd));
+
+    auto* timeline = menuBar()->addMenu(tr("&Timeline"));
+    timeline->addAction(m_actions->action(ActionId::TimelineAddText));
 
     auto* view = menuBar()->addMenu(tr("&View"));
     view->addAction(m_actions->action(ActionId::TimelineZoomIn));
@@ -195,7 +206,7 @@ void MainWindow::buildToolBar() {
 void MainWindow::buildCentralLayout() {
     m_mediaPanel = new MediaPanel(*m_document, *m_actions, *m_importer, this);
     m_previewPanel = new PreviewPanel(*m_actions, *m_playback, this);
-    m_inspectorPanel = new InspectorPanel(this);
+    m_inspectorPanel = new InspectorPanel(*m_document, this);
     m_timelinePanel = new TimelinePanel(*m_document, *m_actions, this);
 
     m_topSplitter = new QSplitter(Qt::Horizontal, this);
@@ -278,6 +289,7 @@ void MainWindow::connectActions() {
         m_playback->seek(t, scrubbing);
     });
     connect(tl, &TimelineView::selectionChanged, this, [this] {
+        m_inspectorPanel->setSelection(m_timelinePanel->view()->selection());
         if (m_playback->mode() == PlaybackController::Mode::Source && m_timelinePanel->view()->hasSelection()) showSequenceInPreview(m_timelinePanel->view()->playhead());
     });
     connect(tl, &TimelineView::externalFilesDropped, this, [this](const QStringList& paths, TimePoint at) {

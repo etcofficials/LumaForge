@@ -19,11 +19,19 @@ namespace lf::ui {
 // The view observes the Document and turns gestures into SequenceEdits
 // (through ops::*) which it pushes as commands. It never mutates the project
 // directly, so every gesture is undoable.
+// The editing tool decides what a press in the lane area does. Tools are a
+// property of the view (set from the ActionRegistry's tool actions), never
+// implemented as separate widgets.
+enum class EditTool { Select, Blade };
+
 class TimelineView : public QWidget {
     Q_OBJECT
 public:
     explicit TimelineView(project::Document& doc, QWidget* parent = nullptr);
     ~TimelineView() override;
+
+    [[nodiscard]] EditTool tool() const noexcept { return m_tool; }
+    [[nodiscard]] bool canPaste() const noexcept { return !m_clipboard.empty(); }
 
     [[nodiscard]] TimePoint playhead() const noexcept { return m_playhead; }
     [[nodiscard]] Rational frameRate() const noexcept { return m_fps; }
@@ -54,9 +62,15 @@ public slots:
     void selectAll();
     void clearSelection();
 
+    void setTool(lf::ui::EditTool tool);
+
     // Edits (each is one undo step)
     void splitAtPlayhead();
     void deleteSelection(bool ripple);
+    void copySelection();
+    void paste();              // at the playhead
+    void duplicateSelection();
+    void addTextClip();        // 5 s title at the playhead on the top video track
     // Adds media at the given time on the default tracks (V1/A1), or at the
     // sequence end when time < 0. Returns the created visual/audio clip ids.
     std::vector<lf::project::ClipId> addMedia(const QList<lf::project::MediaId>& ids, lf::TimePoint at);
@@ -66,12 +80,15 @@ signals:
     void userSeeked(lf::TimePoint time, bool scrubbing);   // the user moved the playhead (preview must seek)
     void viewChanged();                         // zoom or scroll changed
     void selectionChanged();
+    void clipboardChanged();
+    void toolChanged(lf::ui::EditTool tool);
     void clipDoubleClicked(lf::project::ClipId id);
     void contextMenuRequested(const QPoint& globalPos, lf::project::ClipId clipUnderCursor);
     // Files from Explorer dropped on the timeline; the owner imports them and calls addMediaAt().
     void externalFilesDropped(const QStringList& paths, lf::TimePoint at);
 
 protected:
+    bool event(QEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
@@ -95,13 +112,14 @@ private:
         int height = 0;
         bool muted = false;
         bool locked = false;
+        bool solo = false;
     };
     struct TickSpec {
         Ticks major;
         int minorDivisions;
         bool labelFrames;
     };
-    enum class Gesture { None, Scrub, PendingClip, Move, TrimStart, TrimEnd };
+    enum class Gesture { None, Scrub, PendingClip, Move, TrimStart, TrimEnd, PendingMarquee, Marquee };
     struct Hit {
         project::ClipId clip = project::ClipId::Invalid;
         bool nearStart = false;
@@ -123,8 +141,9 @@ private:
     [[nodiscard]] QRectF clipRect(const project::Clip& c) const;
     [[nodiscard]] Hit hitTest(const QPoint& pos) const;
     [[nodiscard]] Duration snapTolerance() const noexcept;
-    [[nodiscard]] QRect muteButtonRect(const Lane& lane) const;
-    [[nodiscard]] QRect lockButtonRect(const Lane& lane) const;
+    enum class TrackFlag { Mute, Solo, Lock };   // Mute on a video track = hidden
+    struct LaneButton { QRect rect; TrackFlag flag; };
+    [[nodiscard]] std::vector<LaneButton> laneButtons(const Lane& lane) const;
 
     // Model sync
     void onDocumentChange(const project::Change& change);
@@ -132,7 +151,7 @@ private:
     void refreshDuration();
     void pruneSelection();
     void commit(const QString& text, project::SequenceEdit edit);
-    void toggleTrackFlag(project::TrackId id, bool lock);
+    void toggleTrackFlag(project::TrackId id, TrackFlag flag);
 
     // Painting
     void paintRuler(QPainter& p, const QRect& r, const TickSpec& ticks);
@@ -141,6 +160,7 @@ private:
     void paintClips(QPainter& p, const QRect& area);
     void paintClip(QPainter& p, const project::Clip& c, const QRectF& r, bool selected, bool ghost, bool dimmed);
     void paintDropGhosts(QPainter& p);
+    void paintMarquee(QPainter& p);
     void paintSnapGuide(QPainter& p);
     void paintPlayhead(QPainter& p);
 
@@ -152,6 +172,9 @@ private:
     void selectClip(project::ClipId id, Qt::KeyboardModifiers mods);
     [[nodiscard]] bool isSelected(project::ClipId id) const;
     void updateMovePreview(const QPoint& pos);
+    void updateMarquee(const QPoint& pos);
+    void bladeClick(const QPoint& pos, project::ClipId clip);
+    void selectAdded(const project::SequenceEdit& edit, const QString& text);
     void updateTrimPreview(const QPoint& pos);
     void finishGesture(bool commitEdit);
     [[nodiscard]] std::optional<TimePoint> snapped(TimePoint t, const std::vector<project::ClipId>& ignore) const;
@@ -170,6 +193,8 @@ private:
     int m_hoverX = -1;
     std::vector<Lane> m_lanes;
     std::vector<project::ClipId> m_selection;
+    EditTool m_tool = EditTool::Select;
+    std::vector<project::Clip> m_clipboard;   // copies; ids are reassigned on paste
 
     // Gesture state
     Gesture m_gesture = Gesture::None;
@@ -184,6 +209,8 @@ private:
     std::optional<TimePoint> m_snapGuide;
     QString m_previewText;
     std::vector<project::Clip> m_previewClipsCache;
+    QRect m_marquee;                                  // current rubber band (widget coords)
+    std::vector<project::ClipId> m_marqueeBase;       // selection when the band started (Ctrl/Shift add to it)
 
     // External drag (media bin / Explorer)
     struct DropGhost { QRectF rect; project::ClipKind kind; QString name; };

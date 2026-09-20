@@ -3,6 +3,7 @@
 #include "ui/Icons.h"
 
 #include <QAbstractSpinBox>
+#include <QActionGroup>
 #include <QApplication>
 #include <QComboBox>
 #include <QEvent>
@@ -62,6 +63,12 @@ const ActionDef kActions[] = {
     {ActionId::ClipDelete,      "clipDelete",      "&Delete",             "delete", QKeySequence::Delete, "Delete the selected clips", false, false},
     {ActionId::ClipRippleDelete,"clipRippleDelete","&Ripple Delete",      nullptr,  Shortcut{Qt::SHIFT | Qt::Key_Delete}, "Delete the selected clips and close the gap", false, false},
     {ActionId::ClipSelectAll,   "clipSelectAll",   "Select &All",         nullptr,  QKeySequence::SelectAll, "Select all clips", false, false},
+    {ActionId::EditCopy,        "editCopy",        "&Copy",               nullptr,  QKeySequence::Copy,   "Copy the selected clips", false, false},
+    {ActionId::EditPaste,       "editPaste",       "&Paste",              nullptr,  QKeySequence::Paste,  "Paste clips at the playhead", false, false},
+    {ActionId::EditDuplicate,   "editDuplicate",   "D&uplicate",          nullptr,  Shortcut{Qt::CTRL | Qt::Key_D}, "Duplicate the selected clips after themselves", false, false},
+
+    {ActionId::ToolSelect,      "toolSelect",      "&Select Tool",        "tool-select", Shortcut{Qt::Key_V}, "Select, move and trim clips", true},
+    {ActionId::ToolBlade,       "toolBlade",       "&Blade Tool",         "tool-blade",  Shortcut{Qt::Key_B}, "Click a clip to split it", true},
 
     {ActionId::PlayPause,       "playPause",       "&Play/Pause",         "play",   Shortcut{Qt::Key_Space}, "Play or pause"},
     {ActionId::PlayStop,        "playStop",        "S&top",               "stop",   Shortcut{Qt::Key_K}, "Stop and return to the start of playback"},
@@ -74,6 +81,7 @@ const ActionDef kActions[] = {
     {ActionId::TimelineZoomOut, "timelineZoomOut", "Zoom &Out",           "zoom-out", Shortcut{Qt::Key_Minus}, "Zoom out on the timeline"},
     {ActionId::TimelineZoomFit, "timelineZoomFit", "Zoom to &Fit",        "zoom-fit", Shortcut{Qt::SHIFT | Qt::Key_Z}, "Fit the whole sequence in view"},
     {ActionId::TimelineSnap,    "timelineSnap",    "S&napping",           "magnet",   Shortcut{Qt::Key_N}, "Snap clips and the playhead to edges", true},
+    {ActionId::TimelineAddText, "timelineAddText", "Add &Text",           "text",     Shortcut{Qt::CTRL | Qt::Key_T}, "Add a text clip at the playhead"},
 
     {ActionId::Export,          "export",          "&Export...",          "export", Shortcut{Qt::CTRL | Qt::Key_M}, "Export the sequence to a video file", false, false},
 
@@ -97,6 +105,11 @@ ActionRegistry::ActionRegistry(QObject* parent) : QObject(parent) {
         a->setShortcutContext(Qt::WindowShortcut);
         m_actions.insert(def.id, a);
     }
+    auto* tools = new QActionGroup(this);
+    tools->setExclusive(true);
+    tools->addAction(action(ActionId::ToolSelect));
+    tools->addAction(action(ActionId::ToolBlade));
+    action(ActionId::ToolSelect)->setChecked(true);
     qApp->installEventFilter(this);
 }
 

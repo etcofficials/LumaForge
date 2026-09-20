@@ -10,6 +10,7 @@
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
+#include <QHelpEvent>
 #include <QKeyEvent>
 #include <QMimeData>
 #include <QMouseEvent>
@@ -106,6 +107,7 @@ void TimelineView::rebuildLanes() {
         l.height = t.kind == TrackKind::Video ? m.videoTrackHeight : m.audioTrackHeight;
         l.muted = t.muted;
         l.locked = t.locked;
+        l.solo = t.solo;
         m_lanes.push_back(l);
         y += l.height;
     }
@@ -132,19 +134,30 @@ void TimelineView::commit(const QString& text, SequenceEdit edit) {
     m_doc.push(std::make_unique<SequenceEditCommand>(m_doc, text.toStdString(), std::move(edit)));
 }
 
-void TimelineView::toggleTrackFlag(TrackId id, bool lock) {
+void TimelineView::toggleTrackFlag(TrackId id, TrackFlag flag) {
     const Track* t = m_doc.project().sequence.findTrack(id);
     if (!t) return;
     Track n = *t;
-    if (lock) n.locked = !n.locked;
-    else n.muted = !n.muted;
+    const QString name = QString::fromStdString(n.name);
+    QString text;
+    switch (flag) {
+        case TrackFlag::Lock:
+            n.locked = !n.locked;
+            text = n.locked ? tr("Lock %1").arg(name) : tr("Unlock %1").arg(name);
+            break;
+        case TrackFlag::Solo:
+            n.solo = !n.solo;
+            text = n.solo ? tr("Solo %1").arg(name) : tr("Unsolo %1").arg(name);
+            break;
+        case TrackFlag::Mute:
+            n.muted = !n.muted;
+            if (n.kind == TrackKind::Video) text = n.muted ? tr("Hide %1").arg(name) : tr("Show %1").arg(name);
+            else text = n.muted ? tr("Mute %1").arg(name) : tr("Unmute %1").arg(name);
+            break;
+    }
     SequenceEdit e;
     e.tracks.push_back(n);
-    const QString name = QString::fromStdString(n.name);
-    commit(lock ? (n.locked ? tr("Lock %1").arg(name) : tr("Unlock %1").arg(name))
-                : (n.muted ? (n.kind == TrackKind::Video ? tr("Hide %1").arg(name) : tr("Mute %1").arg(name))
-                           : (n.kind == TrackKind::Video ? tr("Show %1").arg(name) : tr("Unmute %1").arg(name))),
-           std::move(e));
+    commit(text, std::move(e));
 }
 
 // ---------------------------------------------------------------- geometry
@@ -239,8 +252,19 @@ TimelineView::Hit TimelineView::hitTest(const QPoint& pos) const {
 
 Duration TimelineView::snapTolerance() const noexcept { return Duration{ticksPerPixel() * kSnapPx}; }
 
-QRect TimelineView::muteButtonRect(const Lane& lane) const { return QRect(headerWidth() - 52, lane.y + (lane.height - 18) / 2, 20, 18); }
-QRect TimelineView::lockButtonRect(const Lane& lane) const { return QRect(headerWidth() - 28, lane.y + (lane.height - 18) / 2, 20, 18); }
+std::vector<TimelineView::LaneButton> TimelineView::laneButtons(const Lane& lane) const {
+    // Right-aligned, compact: video = [eye][L], audio = [M][S][L].
+    std::vector<TrackFlag> flags = lane.kind == TrackKind::Video ? std::vector<TrackFlag>{TrackFlag::Mute, TrackFlag::Lock}
+                                                                 : std::vector<TrackFlag>{TrackFlag::Mute, TrackFlag::Solo, TrackFlag::Lock};
+    std::vector<LaneButton> out;
+    int x = headerWidth() - 8;
+    for (auto it = flags.rbegin(); it != flags.rend(); ++it) {
+        x -= 20;
+        out.push_back({QRect(x, lane.y + (lane.height - 18) / 2, 20, 18), *it});
+        x -= 4;
+    }
+    return out;
+}
 
 TimelineView::TickSpec TimelineView::chooseTicks() const {
     const Ticks frame = frameDuration(m_fps).ticks;
@@ -352,7 +376,56 @@ bool TimelineView::canSplitAtPlayhead() const {
     return false;
 }
 
+void TimelineView::setTool(EditTool tool) {
+    if (tool == m_tool) return;
+    if (m_gesture != Gesture::None) finishGesture(false);
+    m_tool = tool;
+    updateCursor(mapFromGlobal(QCursor::pos()));
+    emit toolChanged(tool);
+}
+
 // ---------------------------------------------------------------- edits
+
+// Commits `edit` and selects the clips it added (paste, duplicate, text).
+void TimelineView::selectAdded(const SequenceEdit& edit, const QString& text) {
+    std::vector<ClipId> ids;
+    for (const auto& c : edit.added) ids.push_back(c.id);
+    commit(text, edit);
+    if (!ids.empty()) setSelection(ids);
+}
+
+void TimelineView::copySelection() {
+    const auto& seq = m_doc.project().sequence;
+    m_clipboard.clear();
+    for (auto id : ops::withLinked(seq, m_selection)) if (const Clip* c = seq.findClip(id)) m_clipboard.push_back(*c);
+    emit clipboardChanged();
+}
+
+void TimelineView::paste() {
+    if (m_clipboard.empty()) return;
+    selectAdded(ops::pasteClips(m_doc, m_clipboard, m_playhead), tr("Paste"));
+}
+
+void TimelineView::duplicateSelection() {
+    if (m_selection.empty()) return;
+    selectAdded(ops::duplicateClips(m_doc, ops::withLinked(m_doc.project().sequence, m_selection)), tr("Duplicate"));
+}
+
+void TimelineView::addTextClip() {
+    const auto& seq = m_doc.project().sequence;
+    // Topmost unlocked video track, so the title sits above the footage.
+    const Track* track = nullptr;
+    for (const auto& t : seq.tracks) if (t.kind == TrackKind::Video && !t.locked) { track = &t; break; }
+    if (!track) return;
+    Clip c;
+    c.id = m_doc.allocateClipId();
+    c.track = track->id;
+    c.kind = ClipKind::Text;
+    c.name = tr("Title").toStdString();
+    c.start = m_playhead;
+    c.duration = ops::kDefaultTextDuration;
+    selectAdded(ops::insertClips(m_doc, {c}), tr("Add Text"));
+}
 
 void TimelineView::splitAtPlayhead() {
     const auto& seq = m_doc.project().sequence;
@@ -418,6 +491,11 @@ void TimelineView::updateCursor(const QPoint& pos) {
     if (m_gesture != Gesture::None) return;
     if (pos.x() < headerWidth()) { setCursor(Qt::ArrowCursor); return; }
     const Hit hit = hitTest(pos);
+    if (m_tool == EditTool::Blade) {
+        const Lane* lane = laneAt(pos.y());
+        setCursor(isValid(hit.clip) ? (lane && lane->locked ? Qt::ForbiddenCursor : Qt::SplitHCursor) : Qt::ArrowCursor);
+        return;
+    }
     if (isValid(hit.clip)) {
         const Lane* lane = laneAt(pos.y());
         if (lane && lane->locked) setCursor(Qt::ForbiddenCursor);
@@ -428,13 +506,48 @@ void TimelineView::updateCursor(const QPoint& pos) {
     }
 }
 
+// Blade: split the clicked clip. When the playhead is inside it (or inside
+// other selected clips) the cut lands on the playhead - that is where the
+// user has been looking - otherwise at the click position.
+void TimelineView::bladeClick(const QPoint& pos, ClipId clip) {
+    const auto& seq = m_doc.project().sequence;
+    const Clip* c = seq.findClip(clip);
+    if (!c) return;
+    if (m_playhead > c->start && m_playhead < c->end()) {
+        std::vector<ClipId> ids{clip};
+        for (auto id : m_selection) if (const Clip* s = seq.findClip(id); s && m_playhead > s->start && m_playhead < s->end()) ids.push_back(id);
+        commit(tr("Split Clip"), ops::splitClips(m_doc, ids, m_playhead));
+        return;
+    }
+    TimePoint t = snapToFrame(TimePoint{ticksFromX(pos.x())}, m_fps);
+    if (auto s = snapped(t, ops::withLinked(seq, {clip}))) t = *s;
+    commit(tr("Split Clip"), ops::splitClips(m_doc, {clip}, t));
+}
+
+void TimelineView::updateMarquee(const QPoint& pos) {
+    const QRect area = laneArea();
+    const QPoint clamped(std::clamp(pos.x(), area.left(), area.right()), std::clamp(pos.y(), area.top(), area.bottom()));
+    const QRect before = m_marquee;
+    m_marquee = QRect(m_pressPos, clamped).normalized();
+    const Ticks t0 = ticksFromX(m_marquee.left()), t1 = ticksFromX(m_marquee.right());
+    std::vector<ClipId> next = (m_pressMods & (Qt::ControlModifier | Qt::ShiftModifier)) ? m_marqueeBase : std::vector<ClipId>{};
+    for (const auto& c : m_doc.project().sequence.clips) {
+        const Lane* lane = laneFor(c.track);
+        if (!lane) continue;
+        const bool rows = lane->y < m_marquee.bottom() && lane->y + lane->height > m_marquee.top();
+        const bool time = c.start.ticks <= t1 && c.end().ticks >= t0;
+        if (rows && time && !contains(next, c.id)) next.push_back(c.id);
+    }
+    setSelection(next);
+    update(before.united(m_marquee).adjusted(-2, -2, 2, 2));
+}
+
 void TimelineView::mousePressEvent(QMouseEvent* e) {
     setFocus(Qt::MouseFocusReason);
     const QPoint pos = e->position().toPoint();
     if (e->button() == Qt::LeftButton && pos.x() < headerWidth()) {
         if (const Lane* lane = laneAt(pos.y())) {
-            if (muteButtonRect(*lane).contains(pos)) toggleTrackFlag(lane->id, false);
-            else if (lockButtonRect(*lane).contains(pos)) toggleTrackFlag(lane->id, true);
+            for (const auto& b : laneButtons(*lane)) if (b.rect.contains(pos)) { toggleTrackFlag(lane->id, b.flag); break; }
         }
         e->accept();
         return;
@@ -450,6 +563,11 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
         }
         const Hit hit = hitTest(pos);
         const Lane* lane = laneAt(pos.y());
+        if (m_tool == EditTool::Blade) {
+            if (isValid(hit.clip) && lane && !lane->locked) bladeClick(pos, hit.clip);
+            e->accept();
+            return;
+        }
         if (isValid(hit.clip)) {
             m_pressClip = hit.clip;
             m_pressWasSelected = isSelected(hit.clip);
@@ -461,9 +579,10 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
             e->accept();
             return;
         }
+        // Empty lane: a click seeks, a drag draws a selection rectangle.
+        m_marqueeBase = m_selection;
         if (!(e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) clearSelection();
-        m_gesture = Gesture::Scrub;
-        seekTo(pos.x());
+        m_gesture = Gesture::PendingMarquee;
         e->accept();
         return;
     }
@@ -498,6 +617,14 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e) {
         case Gesture::TrimEnd:
             autoScrollTowards(pos.x());
             updateTrimPreview(pos);
+            return;
+        case Gesture::PendingMarquee:
+            if ((pos - m_pressPos).manhattanLength() < kDragThresholdPx) return;
+            m_gesture = Gesture::Marquee;
+            [[fallthrough]];
+        case Gesture::Marquee:
+            autoScrollTowards(pos.x());
+            updateMarquee(pos);
             return;
         case Gesture::None:
             break;
@@ -581,6 +708,17 @@ void TimelineView::mouseReleaseEvent(QMouseEvent* e) {
             finishGesture(true);
             updateCursor(e->position().toPoint());
             return;
+        case Gesture::PendingMarquee:
+            seekTo(m_pressPos.x());            // it was a click after all
+            emit userSeeked(m_playhead, false);
+            break;
+        case Gesture::Marquee: {
+            const QRect old = m_marquee;
+            m_marquee = QRect();
+            m_marqueeBase.clear();
+            update(old.adjusted(-2, -2, 2, 2));
+            break;
+        }
         case Gesture::None:
             break;
     }
@@ -600,17 +738,20 @@ void TimelineView::finishGesture(bool commitEdit) {
     m_previewTrackDelta = 0;
     m_snapGuide.reset();
     m_previewText.clear();
+    m_marquee = QRect();
+    m_marqueeBase.clear();
     update();
 }
 
 void TimelineView::mouseDoubleClickEvent(QMouseEvent* e) {
     const Hit hit = hitTest(e->position().toPoint());
-    if (e->button() == Qt::LeftButton && isValid(hit.clip)) {
+    if (e->button() == Qt::LeftButton && isValid(hit.clip) && m_tool == EditTool::Select) {
         emit clipDoubleClicked(hit.clip);
         e->accept();
         return;
     }
-    QWidget::mouseDoubleClickEvent(e);
+    // Empty space / blade: a fast second press behaves like any other press.
+    mousePressEvent(e);
 }
 
 void TimelineView::keyPressEvent(QKeyEvent* e) {
@@ -620,6 +761,35 @@ void TimelineView::keyPressEvent(QKeyEvent* e) {
         return;
     }
     QWidget::keyPressEvent(e);
+}
+
+bool TimelineView::event(QEvent* e) {
+    if (e->type() == QEvent::ToolTip) {
+        auto* he = static_cast<QHelpEvent*>(e);
+        const QPoint pos = he->pos();
+        QString text;
+        if (pos.x() < headerWidth()) {
+            if (const Lane* lane = laneAt(pos.y())) {
+                for (const auto& b : laneButtons(*lane)) {
+                    if (!b.rect.contains(pos)) continue;
+                    switch (b.flag) {
+                        case TrackFlag::Mute: text = lane->kind == TrackKind::Video ? tr("Toggle track visibility") : tr("Mute track"); break;
+                        case TrackFlag::Solo: text = tr("Solo track (only soloed tracks play)"); break;
+                        case TrackFlag::Lock: text = tr("Lock track (no edits)"); break;
+                    }
+                }
+            }
+        } else if (const Hit hit = hitTest(pos); isValid(hit.clip)) {
+            if (const Clip* c = m_doc.project().sequence.findClip(hit.clip)) {
+                text = QStringLiteral("%1\n%2 → %3  (%4)").arg(QString::fromStdString(c->name), formatTimecode(c->start, m_fps), formatTimecode(c->end(), m_fps), formatClock(c->duration));
+                if (hit.nearStart || hit.nearEnd) text += tr("\nDrag to trim");
+            }
+        }
+        if (text.isEmpty()) QToolTip::hideText();
+        else QToolTip::showText(he->globalPos(), text, this);
+        return true;
+    }
+    return QWidget::event(e);
 }
 
 void TimelineView::leaveEvent(QEvent*) {
@@ -773,7 +943,18 @@ void TimelineView::paintEvent(QPaintEvent* e) {
         p.drawLine(m_hoverX, rulerHeight(), m_hoverX, height());
     }
     paintSnapGuide(p);
+    paintMarquee(p);
     paintPlayhead(p);
+}
+
+void TimelineView::paintMarquee(QPainter& p) {
+    if (m_gesture != Gesture::Marquee || m_marquee.isNull()) return;
+    const auto& pal = Theme::palette();
+    QColor fill = pal.accent;
+    fill.setAlpha(40);
+    p.fillRect(m_marquee, fill);
+    p.setPen(QPen(pal.accent, 1));
+    p.drawRect(m_marquee.adjusted(0, 0, -1, -1));
 }
 
 void TimelineView::paintRuler(QPainter& p, const QRect& r, const TickSpec& ticks) {
@@ -828,20 +1009,43 @@ void TimelineView::paintHeaders(QPainter& p) {
         p.setFont(bold);
         p.drawText(QRect(12, lane.y, w - 70, lane.height), Qt::AlignLeft | Qt::AlignVCenter, lane.name);
 
-        // Toggle buttons: M (mute / hide) and L (lock)
-        auto button = [&](const QRect& br, const QString& letter, bool on, const QColor& onColor) {
+        // Toggle buttons: video [eye][L], audio [M][S][L]
+        auto button = [&](const QRect& br, const QString& letter, bool on, const QColor& onColor, bool glyphEye = false) {
             p.setRenderHint(QPainter::Antialiasing, true);
             QPainterPath path;
             path.addRoundedRect(QRectF(br).adjusted(0.5, 0.5, -0.5, -0.5), 3, 3);
             if (on) { p.fillPath(path, onColor); p.setPen(Qt::NoPen); }
             else { p.setPen(QPen(pal.borderStrong, 1)); p.drawPath(path); }
-            p.setFont(small);
             p.setPen(on ? pal.accentText : pal.textMuted);
-            p.drawText(br, Qt::AlignCenter, letter);
+            if (glyphEye) {
+                // Eye: visible when off (track shown), struck through when hidden.
+                const QPointF c(br.center().x() + 0.5, br.center().y() + 0.5);
+                QPainterPath eye;
+                eye.moveTo(c.x() - 6, c.y());
+                eye.quadTo(c.x(), c.y() - 5.5, c.x() + 6, c.y());
+                eye.quadTo(c.x(), c.y() + 5.5, c.x() - 6, c.y());
+                p.setPen(QPen(on ? pal.accentText : pal.textSecondary, 1.2));
+                p.drawPath(eye);
+                p.setBrush(on ? pal.accentText : pal.textSecondary);
+                p.drawEllipse(c, 1.8, 1.8);
+                p.setBrush(Qt::NoBrush);
+                if (on) p.drawLine(QPointF(c.x() - 6, c.y() + 5), QPointF(c.x() + 6, c.y() - 5));
+            } else {
+                p.setFont(small);
+                p.drawText(br, Qt::AlignCenter, letter);
+            }
             p.setRenderHint(QPainter::Antialiasing, false);
         };
-        button(muteButtonRect(lane), QStringLiteral("M"), lane.muted, pal.warning);
-        button(lockButtonRect(lane), QStringLiteral("L"), lane.locked, pal.danger);
+        for (const auto& b : laneButtons(lane)) {
+            switch (b.flag) {
+                case TrackFlag::Mute:
+                    if (lane.kind == TrackKind::Video) button(b.rect, QString(), lane.muted, pal.warning, true);
+                    else button(b.rect, QStringLiteral("M"), lane.muted, pal.warning);
+                    break;
+                case TrackFlag::Solo: button(b.rect, QStringLiteral("S"), lane.solo, pal.success); break;
+                case TrackFlag::Lock: button(b.rect, QStringLiteral("L"), lane.locked, pal.danger); break;
+            }
+        }
     }
     const int bottom = m_lanes.empty() ? rulerHeight() : m_lanes.back().y + m_lanes.back().height;
     p.fillRect(QRect(0, bottom, w, height() - bottom), pal.timelineBg);

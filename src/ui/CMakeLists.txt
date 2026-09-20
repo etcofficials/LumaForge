@@ -6,6 +6,10 @@ qt_add_library(lf_ui STATIC
     MainWindow.h            MainWindow.cpp
     widgets/PanelHeader.h   widgets/PanelHeader.cpp
     widgets/EmptyState.h    widgets/EmptyState.cpp
+    widgets/CollapsibleSection.h widgets/CollapsibleSection.cpp
+    widgets/ParamSlider.h   widgets/ParamSlider.cpp
+    inspector/InspectorSection.h
+    inspector/ClipInfoSection.h inspector/ClipInfoSection.cpp
     panels/MediaPanel.h     panels/MediaPanel.cpp
     panels/InspectorPanel.h panels/InspectorPanel.cpp
     preview/PreviewWidget.h preview/PreviewWidget.cpp
@@ -68,4 +72,7 @@ qt_add_resources(lf_ui "lf_ui_resources"
         "${CMAKE_SOURCE_DIR}/resources/icons/add-to-timeline.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/audio.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/audio-muted.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/tool-select.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/tool-blade.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/text.svg"
 )

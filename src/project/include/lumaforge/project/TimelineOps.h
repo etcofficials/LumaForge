@@ -57,6 +57,17 @@ SequenceEdit splitAt(Document& doc, TimePoint time);
 // Removes clips; with ripple, later clips on every track shift left to close the gap.
 SequenceEdit removeClips(Document& doc, const std::vector<ClipId>& ids, bool ripple);
 
+enum class PasteMode { Overwrite, Insert };
+// Copies of the clips (with links preserved between copies) placed so that the
+// earliest copy starts at `at`, on the same tracks; new ids from `doc`.
+// Overwrite replaces what lies underneath; Insert first shifts everything at
+// or after `at` on the affected tracks right by the span of the group.
+SequenceEdit pasteClips(Document& doc, const std::vector<Clip>& source, TimePoint at, PasteMode mode = PasteMode::Overwrite);
+// Copies inserted (never overwriting) immediately after the group.
+SequenceEdit duplicateClips(Document& doc, const std::vector<ClipId>& ids);
+// Fresh copies (new ids, links remapped among the copies) shifted by `delta`.
+std::vector<Clip> cloneClips(Document& doc, const std::vector<Clip>& source, Duration delta);
+
 // Clip ids plus their linked partners (deduplicated).
 std::vector<ClipId> withLinked(const Sequence& seq, const std::vector<ClipId>& ids);
 

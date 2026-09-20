@@ -315,3 +315,66 @@ TEST_CASE("audio gain applies fades and mute") {
     c.audio.muted = true;
     CHECK(playback::SequenceProgram::gainAt(c, sec(5)) == 0.0f);
 }
+
+TEST_CASE("duplicate places copies right after the group, links remapped, properties kept") {
+    Document doc;
+    const MediaId a = addVideo(doc, "a.mp4", 4);
+    const ClipId v = place(doc, a, 1);
+    auto& seq = doc.project().sequence;
+    seq.findClip(v)->transform.scale = 0.5f;
+    seq.findClip(v)->color.saturation = 1.5f;
+    const ClipId au = seq.findClip(v)->link;
+    doc.push(std::make_unique<SequenceEditCommand>(doc, "Duplicate", ops::duplicateClips(doc, ops::withLinked(seq, {v}))));
+    CHECK(seq.clips.size() == 4);
+    const Clip* copy = seq.clipAt(V1(doc), sec(6));
+    CHECK(copy && copy->start == sec(5) && copy->duration == dsec(4));
+    CHECK(copy->id != v && copy->transform.scale == 0.5f && copy->color.saturation == 1.5f && copy->media == a);
+    const Clip* copyAudio = seq.findClip(copy->link);
+    CHECK(copyAudio && copyAudio->kind == ClipKind::Audio && copyAudio->link == copy->id && copyAudio->id != au);
+    doc.undoStack().undo();
+    CHECK(seq.clips.size() == 2);
+}
+
+TEST_CASE("duplicate inserts: later clips shift right, a straddling clip is split around the copy") {
+    Document doc;
+    const MediaId a = addVideo(doc, "a.mp4", 2, false);
+    const MediaId b = addVideo(doc, "b.mp4", 10, false);
+    const ClipId c1 = place(doc, a, 0);
+    const ClipId c2 = place(doc, b, 2);       // [2,12)
+    auto& seq = doc.project().sequence;
+    // Duplicate c2's first half after splitting it at 5: pieces [2,5) and [5,12)
+    doc.push(std::make_unique<SequenceEditCommand>(doc, "Split", ops::splitClips(doc, {c2}, sec(5))));
+    doc.push(std::make_unique<SequenceEditCommand>(doc, "Duplicate", ops::duplicateClips(doc, {c2})));
+    auto v1 = seq.clipsOnTrack(V1(doc));
+    CHECK(v1.size() == 4);
+    CHECK(v1[0]->id == c1);
+    CHECK(v1[1]->id == c2 && v1[1]->end() == sec(5));
+    CHECK(v1[2]->start == sec(5) && v1[2]->duration == dsec(3) && v1[2]->sourceIn == sec(0));   // the copy
+    CHECK(v1[3]->start == sec(8) && v1[3]->duration == dsec(7) && v1[3]->sourceIn == sec(3));   // shifted, untouched
+    // Duplicate c1 (ends at 2): everything from 2 on shifts by 2 s; nothing is lost
+    doc.push(std::make_unique<SequenceEditCommand>(doc, "Duplicate", ops::duplicateClips(doc, {c1})));
+    v1 = seq.clipsOnTrack(V1(doc));
+    CHECK(v1.size() == 5 && v1[1]->start == sec(2) && v1[2]->start == sec(4) && seq.duration() == dsec(17));
+}
+
+TEST_CASE("paste lands the earliest copy at the playhead and overwrites underneath") {
+    Document doc;
+    const MediaId a = addVideo(doc, "a.mp4", 2, false);
+    const ClipId c1 = place(doc, a, 0);
+    place(doc, a, 10);
+    auto& seq = doc.project().sequence;
+    std::vector<Clip> clipboard{*seq.findClip(c1)};
+    doc.push(std::make_unique<SequenceEditCommand>(doc, "Paste", ops::pasteClips(doc, clipboard, sec(11))));
+    auto v1 = seq.clipsOnTrack(V1(doc));
+    CHECK(v1.size() == 3);
+    CHECK(v1[1]->start == sec(10) && v1[1]->duration == dsec(1));   // trimmed by the paste
+    CHECK(v1[2]->start == sec(11) && v1[2]->id != c1);
+    // Clipboard survives deletion of the original (it is a copy).
+    doc.push(std::make_unique<SequenceEditCommand>(doc, "Delete", ops::removeClips(doc, {c1}, false)));
+    CHECK(!ops::pasteClips(doc, clipboard, sec(20)).empty());
+    // Media removed from the project -> nothing to paste
+    Project p = doc.project();
+    p.media.clear();
+    doc.reset(p);
+    CHECK(ops::pasteClips(doc, clipboard, sec(0)).empty());
+}

@@ -32,6 +32,9 @@ TimelinePanel::TimelinePanel(project::Document& doc, ActionRegistry& actions, QW
     m_durationLabel->setProperty("muted", true);
     m_durationLabel->setToolTip(tr("Sequence duration"));
     m_header->addWidget(m_durationLabel);
+    m_header->addAction(actions.action(ActionId::ToolSelect));
+    m_header->addAction(actions.action(ActionId::ToolBlade));
+    m_header->addAction(actions.action(ActionId::TimelineAddText));
     m_header->addAction(actions.action(ActionId::ClipSplit));
     m_header->addAction(actions.action(ActionId::ClipDelete));
     m_header->addAction(actions.action(ActionId::TimelineSnap));
@@ -57,6 +60,16 @@ TimelinePanel::TimelinePanel(project::Document& doc, ActionRegistry& actions, QW
     actions.connect(ActionId::ClipDelete, this, [this] { m_view->deleteSelection(false); });
     actions.connect(ActionId::ClipRippleDelete, this, [this] { m_view->deleteSelection(true); });
     actions.connect(ActionId::ClipSelectAll, this, [this] { m_view->selectAll(); });
+    actions.connect(ActionId::EditCopy, this, [this] { m_view->copySelection(); });
+    actions.connect(ActionId::EditPaste, this, [this] { m_view->paste(); });
+    actions.connect(ActionId::EditDuplicate, this, [this] { m_view->duplicateSelection(); });
+    actions.connect(ActionId::TimelineAddText, this, [this] { m_view->addTextClip(); });
+    actions.connect(ActionId::ToolSelect, this, [this] { m_view->setTool(EditTool::Select); });
+    actions.connect(ActionId::ToolBlade, this, [this] { m_view->setTool(EditTool::Blade); });
+    connect(m_view, &TimelineView::toolChanged, this, [this](EditTool t) {
+        m_actions.action(t == EditTool::Blade ? ActionId::ToolBlade : ActionId::ToolSelect)->setChecked(true);
+    });
+    connect(m_view, &TimelineView::clipboardChanged, this, &TimelinePanel::updateActionState);
 
     connect(m_view, &TimelineView::viewChanged, this, &TimelinePanel::syncScrollBar);
     connect(m_view, &TimelineView::selectionChanged, this, &TimelinePanel::updateActionState);
@@ -92,6 +105,9 @@ void TimelinePanel::updateActionState() {
     m_actions.setEnabled(ActionId::ClipDelete, hasSelection);
     m_actions.setEnabled(ActionId::ClipRippleDelete, hasSelection);
     m_actions.setEnabled(ActionId::ClipSelectAll, hasClips);
+    m_actions.setEnabled(ActionId::EditCopy, hasSelection);
+    m_actions.setEnabled(ActionId::EditDuplicate, hasSelection);
+    m_actions.setEnabled(ActionId::EditPaste, m_view->canPaste());
 }
 
 void TimelinePanel::updateDurationLabel() {
@@ -104,10 +120,16 @@ void TimelinePanel::showContextMenu(const QPoint& globalPos, project::ClipId cli
     if (project::isValid(clip)) {
         menu.addAction(m_actions.action(ActionId::ClipSplit));
         menu.addSeparator();
+        menu.addAction(m_actions.action(ActionId::EditCopy));
+        menu.addAction(m_actions.action(ActionId::EditDuplicate));
+        menu.addSeparator();
         menu.addAction(m_actions.action(ActionId::ClipDelete));
         menu.addAction(m_actions.action(ActionId::ClipRippleDelete));
         menu.addSeparator();
     }
+    menu.addAction(m_actions.action(ActionId::EditPaste));
+    menu.addAction(m_actions.action(ActionId::TimelineAddText));
+    menu.addSeparator();
     menu.addAction(m_actions.action(ActionId::ClipSelectAll));
     menu.addSeparator();
     menu.addAction(m_actions.action(ActionId::TimelineZoomFit));

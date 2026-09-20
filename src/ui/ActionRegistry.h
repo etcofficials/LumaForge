@@ -23,8 +23,12 @@ enum class ActionId {
     EditUndo, EditRedo, ClipSplit, ClipDelete, ClipRippleDelete, ClipSelectAll,
     // Playback
     PlayPause, PlayStop, StepBack, StepForward, GoToStart, GoToEnd,
+    // Edit continued
+    EditCopy, EditPaste, EditDuplicate,
+    // Tools (mutually exclusive)
+    ToolSelect, ToolBlade,
     // Timeline
-    TimelineZoomIn, TimelineZoomOut, TimelineZoomFit, TimelineSnap,
+    TimelineZoomIn, TimelineZoomOut, TimelineZoomFit, TimelineSnap, TimelineAddText,
     // Output
     Export,
     // View / Help
