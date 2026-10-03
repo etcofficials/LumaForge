@@ -133,6 +133,21 @@ void InspectorPanel::onDocumentChange(const Change& change) {
     }
 }
 
+bool InspectorPanel::hasSection(const QString& key) const {
+    for (auto* s : m_sections) if (s->sectionKey() == key && !s->isHidden()) return true;
+    return false;
+}
+
+bool InspectorPanel::revealSection(const QString& key) {
+    for (auto* s : m_sections) {
+        if (s->sectionKey() != key || s->isHidden()) continue;
+        s->setExpanded(true);
+        m_scroll->ensureWidgetVisible(s, 0, 0);
+        return true;
+    }
+    return false;
+}
+
 // ---------------------------------------------------------------- editing
 
 void InspectorPanel::editSelection(const QString& undoText, int propertyId, const ClipEdit& fn) {

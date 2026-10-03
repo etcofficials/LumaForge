@@ -12,7 +12,10 @@
 #include "ui/Icons.h"
 #include "ui/Theme.h"
 #include "ui/Timecode.h"
+#include "lumaforge/project/TimelineOps.h"
+#include "ui/dialogs/CommandPalette.h"
 #include "ui/dialogs/DiagnosticsDialog.h"
+#include "ui/dialogs/ShortcutEditor.h"
 #include "ui/dialogs/ProjectSettingsDialog.h"
 #include "ui/home/HomeScreen.h"
 #include "ui/media/ImportController.h"
@@ -33,7 +36,10 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDir>
+#include <QDirIterator>
 #include <QDockWidget>
+#include <QFileDialog>
+#include <QKeyEvent>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFileInfo>
@@ -96,6 +102,9 @@ MainWindow::MainWindow(std::shared_ptr<hw::GpuDevice> gpu, std::shared_ptr<log::
     buildPanels();
     buildStatusBar();
     connectActions();
+    // Every action also lives on the window itself, so its shortcut works whatever
+    // is visible (e.g. the menu bar is hidden in the full-screen viewer).
+    for (ActionId id : m_actions->allIds()) addAction(m_actions->action(id));
 
     m_document->undoStack().setChangeListener([this] { updateUndoActions(); updateWindowTitle(); });
     m_documentListener = m_document->addListener([this](const project::Change& c) { onDocumentChange(c); });
@@ -146,75 +155,99 @@ MainWindow::~MainWindow() {
 // ---------------------------------------------------------------- construction
 
 void MainWindow::buildMenus() {
+    auto add = [this](QMenu* m, std::initializer_list<ActionId> ids) {
+        for (auto id : ids) m->addAction(m_actions->action(id));
+    };
     auto* file = menuBar()->addMenu(tr("&File"));
-    file->addAction(m_actions->action(ActionId::ProjectNew));
-    file->addAction(m_actions->action(ActionId::ProjectOpen));
+    add(file, {ActionId::ProjectNew, ActionId::ProjectOpen});
     m_recentMenu = file->addMenu(tr("Open &Recent"));
     file->addSeparator();
-    file->addAction(m_actions->action(ActionId::ProjectSave));
-    file->addAction(m_actions->action(ActionId::ProjectSaveAs));
-    file->addAction(m_actions->action(ActionId::ProjectSettings));
+    add(file, {ActionId::ProjectSave, ActionId::ProjectSaveAs, ActionId::ProjectSettings});
     file->addSeparator();
-    file->addAction(m_actions->action(ActionId::MediaImport));
-    file->addAction(m_actions->action(ActionId::Export));
+    add(file, {ActionId::MediaImport, ActionId::MediaImportFolder});
     file->addSeparator();
-    file->addAction(m_actions->action(ActionId::ProjectClose));
-    file->addAction(m_actions->action(ActionId::AppQuit));
+    add(file, {ActionId::Export});
+    file->addSeparator();
+    add(file, {ActionId::ProjectClose, ActionId::AppQuit});
 
     auto* edit = menuBar()->addMenu(tr("&Edit"));
-    edit->addAction(m_actions->action(ActionId::EditUndo));
-    edit->addAction(m_actions->action(ActionId::EditRedo));
+    add(edit, {ActionId::EditUndo, ActionId::EditRedo});
     edit->addSeparator();
-    edit->addAction(m_actions->action(ActionId::EditCopy));
-    edit->addAction(m_actions->action(ActionId::EditPaste));
-    edit->addAction(m_actions->action(ActionId::EditDuplicate));
+    add(edit, {ActionId::EditCut, ActionId::EditCopy, ActionId::EditPaste, ActionId::EditPasteOverwrite, ActionId::EditDuplicate});
     edit->addSeparator();
-    edit->addAction(m_actions->action(ActionId::ClipSplit));
-    edit->addAction(m_actions->action(ActionId::ClipDelete));
-    edit->addAction(m_actions->action(ActionId::ClipRippleDelete));
+    add(edit, {ActionId::ClipDelete, ActionId::ClipRippleDelete});
     edit->addSeparator();
-    edit->addAction(m_actions->action(ActionId::ClipSelectAll));
+    add(edit, {ActionId::ClipSelectAll, ActionId::ClipDeselect});
     edit->addSeparator();
-    edit->addAction(m_actions->action(ActionId::ToolSelect));
-    edit->addAction(m_actions->action(ActionId::ToolBlade));
+    add(edit, {ActionId::CommandPalette});
 
     auto* view = menuBar()->addMenu(tr("&View"));
     auto* workspaceSub = view->addMenu(tr("&Workspace"));
-    for (auto id : {ActionId::WorkspaceEdit, ActionId::WorkspaceColor, ActionId::WorkspaceAudio, ActionId::WorkspaceText, ActionId::WorkspaceEffects, ActionId::WorkspaceExport})
-        workspaceSub->addAction(m_actions->action(id));
+    add(workspaceSub, {ActionId::WorkspaceEdit, ActionId::WorkspaceColor, ActionId::WorkspaceAudio, ActionId::WorkspaceText, ActionId::WorkspaceEffects, ActionId::WorkspaceExport});
     workspaceSub->addSeparator();
-    workspaceSub->addAction(m_actions->action(ActionId::WorkspaceReset));
+    add(workspaceSub, {ActionId::WorkspaceReset});
     m_panelsMenu = view->addMenu(tr("&Panels"));
     view->addSeparator();
-    view->addAction(m_actions->action(ActionId::TimelineZoomIn));
-    view->addAction(m_actions->action(ActionId::TimelineZoomOut));
-    view->addAction(m_actions->action(ActionId::TimelineZoomFit));
-    view->addAction(m_actions->action(ActionId::TimelineSnap));
+    add(view, {ActionId::ViewerFullscreen});
+    auto* zoom = view->addMenu(tr("Viewer &Zoom"));
+    add(zoom, {ActionId::ViewerZoomFit, ActionId::ViewerZoom25, ActionId::ViewerZoom50, ActionId::ViewerZoom100, ActionId::ViewerZoom200});
+    auto* quality = view->addMenu(tr("Preview &Quality"));
+    add(quality, {ActionId::QualityAuto, ActionId::QualityFull, ActionId::QualityHalf, ActionId::QualityQuarter, ActionId::QualityEighth});
     view->addSeparator();
-    view->addAction(m_actions->action(ActionId::ViewDiagnostics));
+    add(view, {ActionId::TimelineZoomIn, ActionId::TimelineZoomOut, ActionId::TimelineZoomFit});
 
     auto* playback = menuBar()->addMenu(tr("&Playback"));
-    playback->addAction(m_actions->action(ActionId::PlayPause));
-    playback->addAction(m_actions->action(ActionId::PlayStop));
+    add(playback, {ActionId::PlayPause, ActionId::Play, ActionId::Pause, ActionId::PlayStop});
+    auto* speed = playback->addMenu(tr("Playback &Speed"));
+    add(speed, {ActionId::ShuttleReverse, ActionId::Pause, ActionId::ShuttleForward});
     playback->addSeparator();
-    playback->addAction(m_actions->action(ActionId::StepBack));
-    playback->addAction(m_actions->action(ActionId::StepForward));
-    playback->addAction(m_actions->action(ActionId::GoToStart));
-    playback->addAction(m_actions->action(ActionId::GoToEnd));
+    add(playback, {ActionId::StepBack, ActionId::StepForward, ActionId::StepBackLarge, ActionId::StepForwardLarge});
+    playback->addSeparator();
+    add(playback, {ActionId::PrevEdit, ActionId::NextEdit, ActionId::GoToStart, ActionId::GoToEnd});
+    playback->addSeparator();
+    add(playback, {ActionId::PlayLoop});
+    playback->addSeparator();
+    add(playback, {ActionId::MarkIn, ActionId::MarkOut, ActionId::GoToIn, ActionId::GoToOut, ActionId::ClearInOut});
+
+    auto* clip = menuBar()->addMenu(tr("&Clip"));
+    add(clip, {ActionId::EditCut, ActionId::ClipSplit, ActionId::ClipTrimStartToPlayhead, ActionId::ClipTrimEndToPlayhead, ActionId::ClipRippleDelete});
+    clip->addSeparator();
+    auto* nudge = clip->addMenu(tr("&Nudge"));
+    add(nudge, {ActionId::ClipNudgeLeft, ActionId::ClipNudgeRight, ActionId::ClipNudgeLeftLarge, ActionId::ClipNudgeRightLarge});
+    add(clip, {ActionId::ClipMoveToPlayhead});
+    clip->addSeparator();
+    add(clip, {ActionId::ClipLift, ActionId::ClipExtract});
+    clip->addSeparator();
+    add(clip, {ActionId::ClipEnable});
 
     auto* timeline = menuBar()->addMenu(tr("&Timeline"));
-    timeline->addAction(m_actions->action(ActionId::TimelineAddText));
+    auto* tools = timeline->addMenu(tr("&Tools"));
+    add(tools, {ActionId::ToolSelect, ActionId::ToolBlade, ActionId::ToolTrim, ActionId::ToolHand, ActionId::ToolZoom, ActionId::ToolText});
+    timeline->addSeparator();
+    add(timeline, {ActionId::TimelineSnap});
+    timeline->addSeparator();
+    add(timeline, {ActionId::TimelineZoomIn, ActionId::TimelineZoomOut, ActionId::TimelineZoomFit});
+
+    auto* audio = menuBar()->addMenu(tr("&Audio"));
+    add(audio, {ActionId::AudioMuteClip});
+
+    auto* video = menuBar()->addMenu(tr("&Video"));
+    add(video, {ActionId::VideoTransform, ActionId::VideoCrop, ActionId::VideoColor, ActionId::VideoEffects});
+
+    auto* text = menuBar()->addMenu(tr("Te&xt"));
+    add(text, {ActionId::TimelineAddText, ActionId::ToolText});
 
     auto* workspace = menuBar()->addMenu(tr("&Workspace"));
-    for (auto id : {ActionId::WorkspaceEdit, ActionId::WorkspaceColor, ActionId::WorkspaceAudio, ActionId::WorkspaceText, ActionId::WorkspaceEffects, ActionId::WorkspaceExport})
-        workspace->addAction(m_actions->action(id));
+    add(workspace, {ActionId::WorkspaceEdit, ActionId::WorkspaceColor, ActionId::WorkspaceAudio, ActionId::WorkspaceText, ActionId::WorkspaceEffects, ActionId::WorkspaceExport});
     workspace->addSeparator();
-    workspace->addAction(m_actions->action(ActionId::WorkspaceReset));
+    add(workspace, {ActionId::WorkspaceReset});
 
     auto* help = menuBar()->addMenu(tr("&Help"));
-    help->addAction(m_actions->action(ActionId::ViewDiagnostics));
+    add(help, {ActionId::HelpShortcuts, ActionId::CommandPalette});
     help->addSeparator();
-    help->addAction(m_actions->action(ActionId::HelpAbout));
+    add(help, {ActionId::ViewDiagnostics, ActionId::HelpSystemInfo});
+    help->addSeparator();
+    add(help, {ActionId::HelpAbout});
 }
 
 void MainWindow::buildToolBar() {
@@ -224,22 +257,50 @@ void MainWindow::buildToolBar() {
     tb->setFloatable(false);
     tb->setIconSize(QSize(16, 16));
     tb->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    m_mainToolBar = tb;
 
-    tb->addAction(m_actions->action(ActionId::ProjectNew));
-    tb->addAction(m_actions->action(ActionId::ProjectOpen));
-    tb->addAction(m_actions->action(ActionId::ProjectSave));
-    tb->addSeparator();
-    tb->addAction(m_actions->action(ActionId::MediaImport));
-    tb->addSeparator();
-    tb->addAction(m_actions->action(ActionId::EditUndo));
-    tb->addAction(m_actions->action(ActionId::EditRedo));
-    tb->addSeparator();
-    tb->addAction(m_actions->action(ActionId::ToolSelect));
-    tb->addAction(m_actions->action(ActionId::ToolBlade));
-    tb->addAction(m_actions->action(ActionId::TimelineAddText));
-    tb->addSeparator();
-    tb->addAction(m_actions->action(ActionId::ClipSplit));
-    tb->addAction(m_actions->action(ActionId::ClipDelete));
+    // Groups can be hidden from the toolbar's context menu (customisation).
+    auto group = [this, tb](const QString& key, const QString& name, std::initializer_list<ActionId> ids) {
+        ToolbarGroup g{key, name, {}};
+        for (auto id : ids) { tb->addAction(m_actions->action(id)); g.items << m_actions->action(id); }
+        g.items << tb->addSeparator();
+        m_toolbarGroups.push_back(g);
+    };
+    group(QStringLiteral("file"), tr("Project"), {ActionId::ProjectNew, ActionId::ProjectOpen, ActionId::ProjectSave, ActionId::ProjectSaveAs});
+    group(QStringLiteral("history"), tr("Undo / Redo"), {ActionId::EditUndo, ActionId::EditRedo});
+    group(QStringLiteral("tools"), tr("Editing Tools"), {ActionId::ToolSelect, ActionId::ToolBlade, ActionId::ToolTrim, ActionId::ToolHand, ActionId::ToolZoom, ActionId::ToolText});
+    group(QStringLiteral("playback"), tr("Playback"), {ActionId::PrevEdit, ActionId::Play, ActionId::Pause, ActionId::PlayStop, ActionId::NextEdit, ActionId::PlayLoop});
+    group(QStringLiteral("viewer"), tr("Viewer"), {ActionId::ViewerZoomFit, ActionId::ViewerZoom50, ActionId::ViewerZoom100, ActionId::ViewerFullscreen});
+    {
+        // Preview quality as a compact drop-down sharing the View menu's actions.
+        auto* q = new QToolButton(tb);
+        q->setPopupMode(QToolButton::InstantPopup);
+        q->setToolTip(tr("<b>Preview quality</b><br>Render resolution of the preview; export always renders at full quality"));
+        auto* menu = new QMenu(q);
+        for (auto id : {ActionId::QualityAuto, ActionId::QualityFull, ActionId::QualityHalf, ActionId::QualityQuarter, ActionId::QualityEighth}) {
+            QAction* a = m_actions->action(id);
+            menu->addAction(a);
+            connect(a, &QAction::toggled, q, [q, a](bool on) { if (on) q->setText(tr("Quality: %1").arg(a->text())); });
+            if (a->isChecked()) q->setText(tr("Quality: %1").arg(a->text()));
+        }
+        q->setMenu(menu);
+        ToolbarGroup g{QStringLiteral("quality"), tr("Preview Quality"), {}};
+        g.items << tb->addWidget(q) << tb->addSeparator();
+        m_toolbarGroups.push_back(g);
+    }
+    {
+        // Performance: what is really accelerated, and how playback is keeping up.
+        m_toolbarHw = new QLabel(tb);
+        m_toolbarHw->setProperty("chip", true);
+        m_toolbarHw->setText(tr("Detecting…"));
+        m_toolbarFps = new QLabel(tb);
+        m_toolbarFps->setProperty("chip", true);
+        m_toolbarFps->setText(tr("— fps"));
+        m_toolbarFps->setToolTip(tr("Preview frames per second and dropped frames while playing"));
+        ToolbarGroup g{QStringLiteral("performance"), tr("Performance"), {}};
+        g.items << tb->addWidget(m_toolbarHw) << tb->addWidget(m_toolbarFps);
+        m_toolbarGroups.push_back(g);
+    }
 
     auto* spacer = new QWidget(tb);
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -251,6 +312,32 @@ void MainWindow::buildToolBar() {
     exportButton->setProperty("primary", true);
     exportButton->setIcon(Icons::icon(QStringLiteral("export"), Theme::palette().accentText, Theme::palette().textDisabled));
     tb->addWidget(exportButton);
+
+    tb->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(tb, &QToolBar::customContextMenuRequested, this, [this, tb](const QPoint& pos) {
+        QMenu menu(this);
+        menu.addSection(tr("Show in toolbar"));
+        for (auto& g : m_toolbarGroups) {
+            auto* a = menu.addAction(g.name);
+            a->setCheckable(true);
+            a->setChecked(g.items.isEmpty() || g.items.first()->isVisible());
+            connect(a, &QAction::toggled, this, [this, key = g.key](bool on) { setToolbarGroupVisible(key, on); });
+        }
+        menu.exec(tb->mapToGlobal(pos));
+    });
+    const QStringList hidden = QSettings().value(QStringLiteral("toolbar/hiddenGroups")).toStringList();
+    for (const auto& key : hidden) setToolbarGroupVisible(key, false);
+}
+
+void MainWindow::setToolbarGroupVisible(const QString& key, bool visible) {
+    QStringList hidden = QSettings().value(QStringLiteral("toolbar/hiddenGroups")).toStringList();
+    for (auto& g : m_toolbarGroups) {
+        if (g.key != key) continue;
+        for (QAction* a : g.items) a->setVisible(visible);
+    }
+    hidden.removeAll(key);
+    if (!visible) hidden << key;
+    QSettings().setValue(QStringLiteral("toolbar/hiddenGroups"), hidden);
 }
 
 void MainWindow::buildWorkspaceBar() {
@@ -434,14 +521,75 @@ void MainWindow::connectActions() {
     m_actions->connect(ActionId::EditRedo, this, [this] { m_document->undoStack().redo(); });
 
     // Transport -> playback engine
-    m_actions->connect(ActionId::PlayPause, this, [this] { m_playback->togglePlay(); });
+    m_actions->connect(ActionId::PlayPause, this, [this] { ensurePreviewProgram(); m_playback->togglePlay(); });
+    m_actions->connect(ActionId::Play, this, [this] { ensurePreviewProgram(); m_playback->play(); });
+    m_actions->connect(ActionId::Pause, this, [this] { m_playback->pause(); });
     m_actions->connect(ActionId::PlayStop, this, [this] { m_playback->stop(); });
+    m_actions->connect(ActionId::ShuttleForward, this, [this] { ensurePreviewProgram(); m_playback->shuttleForward(); });
+    m_actions->connect(ActionId::ShuttleReverse, this, [this] { ensurePreviewProgram(); m_playback->shuttleReverse(); });
     m_actions->connect(ActionId::StepBack, this, [this] { m_playback->stepFrames(-1); });
     m_actions->connect(ActionId::StepForward, this, [this] { m_playback->stepFrames(1); });
+    m_actions->connect(ActionId::StepBackLarge, this, [this] { m_playback->stepFrames(-10); });
+    m_actions->connect(ActionId::StepForwardLarge, this, [this] { m_playback->stepFrames(10); });
     m_actions->connect(ActionId::GoToStart, this, [this] { m_playback->goToStart(); });
     m_actions->connect(ActionId::GoToEnd, this, [this] { m_playback->goToEnd(); });
+    m_actions->connect(ActionId::PrevEdit, this, [this] {
+        if (auto t = project::ops::previousEditPoint(m_document->project().sequence, m_timelinePanel->view()->playhead())) seekTimeline(*t);
+    });
+    m_actions->connect(ActionId::NextEdit, this, [this] {
+        if (auto t = project::ops::nextEditPoint(m_document->project().sequence, m_timelinePanel->view()->playhead())) seekTimeline(*t);
+    });
+    m_actions->connect(ActionId::GoToIn, this, [this] { if (m_document->project().sequence.markIn.ticks >= 0) seekTimeline(m_document->project().sequence.markIn); });
+    m_actions->connect(ActionId::GoToOut, this, [this] { if (m_document->project().sequence.markOut.ticks >= 0) seekTimeline(m_document->project().sequence.markOut); });
+    connect(m_actions->action(ActionId::PlayLoop), &QAction::toggled, this, [this] { applyLoop(); });
+
+    // Viewer zoom + preview quality (exclusive action groups; persisted)
+    const std::pair<ActionId, double> zooms[] = {{ActionId::ViewerZoomFit, 0.0}, {ActionId::ViewerZoom25, 0.25}, {ActionId::ViewerZoom50, 0.5},
+                                                 {ActionId::ViewerZoom100, 1.0}, {ActionId::ViewerZoom200, 2.0}};
+    for (const auto& [id, z] : zooms) {
+        const double zoom = z;
+        m_actions->connect(id, this, [this, zoom] { m_playback->setViewZoom(zoom); });
+    }
+    const std::pair<ActionId, playback::PreviewQuality> qualities[] = {
+        {ActionId::QualityAuto, playback::PreviewQuality::Auto}, {ActionId::QualityFull, playback::PreviewQuality::Full},
+        {ActionId::QualityHalf, playback::PreviewQuality::Half}, {ActionId::QualityQuarter, playback::PreviewQuality::Quarter},
+        {ActionId::QualityEighth, playback::PreviewQuality::Eighth}};
+    const int savedQuality = QSettings().value(QStringLiteral("preview/quality2"), 0).toInt();
+    for (const auto& [id, q] : qualities) {
+        const auto quality = q;
+        m_actions->connect(id, this, [this, quality] {
+            m_playback->setQuality(quality);
+            QSettings().setValue(QStringLiteral("preview/quality2"), static_cast<int>(quality));
+        });
+        if (static_cast<int>(q) == savedQuality) { m_actions->action(id)->setChecked(true); m_playback->setQuality(q); }
+    }
+    m_actions->connect(ActionId::ViewerFullscreen, this, [this] { setViewerFullscreen(m_actions->action(ActionId::ViewerFullscreen)->isChecked()); });
+
+    // Inspector navigation
+    const std::pair<ActionId, const char*> sections[] = {{ActionId::VideoTransform, "transform"}, {ActionId::VideoCrop, "crop"},
+                                                         {ActionId::VideoColor, "color"}, {ActionId::VideoEffects, "effects"}};
+    for (const auto& [id, key] : sections) {
+        const QString k = QString::fromLatin1(key);
+        m_actions->connect(id, this, [this, k] {
+            if (auto* dock = m_workspaces->dock(DockId::Inspector)) { dock->show(); dock->raise(); }
+            m_inspectorPanel->revealSection(k);
+        });
+    }
+
+    // Import folder, help, palette
+    m_actions->connect(ActionId::MediaImportFolder, this, [this] { importFolderWithDialog(); });
+    m_actions->connect(ActionId::HelpShortcuts, this, [this] { ShortcutsDialog dlg(*m_actions, this); dlg.exec(); });
+    m_actions->connect(ActionId::HelpSystemInfo, this, [this] { showDiagnostics(QStringLiteral("system")); });
+    m_actions->connect(ActionId::CommandPalette, this, [this] {
+        if (!m_palette) m_palette = new CommandPalette(*m_actions, this);
+        m_palette->show();
+    });
     connect(m_playback, &PlaybackController::statsChanged, this, &MainWindow::updateStatusStats);
-    connect(m_playback, &PlaybackController::playingChanged, this, [this](bool p) { if (!p) m_statusPlayback->setText(tr("— fps")); });
+    connect(m_playback, &PlaybackController::playingChanged, this, [this](bool p) {
+        if (!p) { m_statusPlayback->setText(tr("— fps")); m_toolbarFps->setText(tr("— fps")); }
+        m_actions->setEnabled(ActionId::Play, !p);
+        m_actions->setEnabled(ActionId::Pause, p);
+    });
     connect(m_playback, &PlaybackController::errorOccurred, this, [this](const QString& m) { m_toasts->show(tr("Playback: %1").arg(m), ToastHost::Kind::Error, 6000); });
 
     m_actions->connect(ActionId::ViewDiagnostics, this, [this] { showDiagnostics(); });
@@ -540,6 +688,7 @@ void MainWindow::onDocumentChange(const project::Change& change) {
         updateWindowTitle();
         updateStatusProject();
     }
+    if (change.kind == project::Change::Kind::MarksChanged || change.kind == project::Change::Kind::Reset) applyLoop();
 }
 
 void MainWindow::scheduleSequenceRefresh() {
@@ -594,6 +743,7 @@ void MainWindow::updateStatusStats(const playback::PlaybackStats& s) {
         QString text = tr("%1 fps").arg(s.previewFps, 0, 'f', 1);
         if (s.droppedFrames) text += tr(" · %1 dropped").arg(s.droppedFrames);
         m_statusPlayback->setText(text);
+        m_toolbarFps->setText(text);
     }
     m_statusDecoder->setText(tr("Decoder %1").arg(s.decoder.empty() || s.decoder == "-" ? QStringLiteral("—") : QString::fromStdString(s.decoder)));
 }
@@ -646,10 +796,12 @@ void MainWindow::setHardwareReport(hw::HwReport report) {
     if (const auto* hwEnc = r.firstAvailableEncoder(hw::EncoderKind::Hardware)) parts << QString::fromStdString(hwEnc->name);
     else parts << tr("CPU encode");
     m_statusHardware->setText(parts.join(QStringLiteral(" · ")));
+    m_toolbarHw->setText(parts.join(QStringLiteral(" · ")));
     QString tip;
     if (const auto* a = r.activeAdapter()) tip = QString::fromStdString(a->name) + QLatin1Char('\n');
     tip += QString::fromStdString(hw::HardwareDetector::summary(r));
     m_statusHardware->setToolTip(tip);
+    m_toolbarHw->setToolTip(tip);
     if (m_diagnostics) m_diagnostics->setHardwareReport(r);
 }
 
@@ -705,6 +857,76 @@ void MainWindow::showDiagnostics(const QString& tab) {
     m_diagnostics->show();
     m_diagnostics->raise();
     m_diagnostics->activateWindow();
+}
+
+void MainWindow::ensurePreviewProgram() {
+    // Transport keys act on the timeline unless the source monitor is showing media.
+    if (m_playback->mode() == PlaybackController::Mode::None) showSequenceInPreview(m_timelinePanel->view()->playhead());
+}
+
+void MainWindow::seekTimeline(TimePoint t) {
+    m_timelinePanel->view()->setPlayhead(t);
+    if (m_playback->mode() != PlaybackController::Mode::Sequence) showSequenceInPreview(t);
+    m_playback->seek(m_timelinePanel->view()->playhead());
+}
+
+void MainWindow::applyLoop() {
+    const auto& seq = m_document->project().sequence;
+    const bool on = m_actions->action(ActionId::PlayLoop)->isChecked();
+    if (seq.hasInOut()) m_playback->setLoop(on, seq.markIn, seq.markOut);
+    else m_playback->setLoop(on, TimePoint{-1}, TimePoint{-1});
+}
+
+void MainWindow::importFolderWithDialog() {
+    QSettings settings;
+    const QString start = settings.value(QStringLiteral("media/lastFolder"), QDir::homePath()).toString();
+    const QString dir = QFileDialog::getExistingDirectory(this, tr("Import Folder"), start);
+    if (dir.isEmpty()) return;
+    settings.setValue(QStringLiteral("media/lastFolder"), dir);
+    QList<QUrl> urls;
+    QDirIterator it(dir, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext()) urls << QUrl::fromLocalFile(it.next());
+    const QStringList paths = ImportController::collectMediaPaths(urls);
+    if (paths.isEmpty()) {
+        m_toasts->show(tr("No media files found in %1").arg(QDir::toNativeSeparators(dir)), ToastHost::Kind::Warning);
+        return;
+    }
+    showEditor();
+    m_importer->importFiles(paths, this);
+}
+
+void MainWindow::setViewerFullscreen(bool on) {
+    if (on == m_viewerFullscreen) return;
+    m_viewerFullscreen = on;
+    m_actions->action(ActionId::ViewerFullscreen)->setChecked(on);
+    if (on) {
+        showEditor();
+        m_preFullscreenState = m_editor->saveState();
+        m_wasMaximized = isMaximized();
+        for (QDockWidget* d : m_editor->findChildren<QDockWidget*>()) d->hide();
+        for (QToolBar* t : m_editor->findChildren<QToolBar*>()) t->hide();
+        menuBar()->hide();
+        statusBar()->hide();
+        showFullScreen();
+        qApp->installEventFilter(this);
+        m_toasts->show(tr("Press Esc or F11 to leave full screen"), ToastHost::Kind::Info, 2500);
+    } else {
+        qApp->removeEventFilter(this);
+        menuBar()->show();
+        statusBar()->show();
+        for (QToolBar* t : m_editor->findChildren<QToolBar*>()) t->show();
+        m_editor->restoreState(m_preFullscreenState);
+        if (m_wasMaximized) showMaximized();
+        else showNormal();
+    }
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (m_viewerFullscreen && event->type() == QEvent::KeyPress && static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape) {
+        setViewerFullscreen(false);
+        return true;
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* event) {

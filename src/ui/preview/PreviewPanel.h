@@ -5,7 +5,6 @@
 
 #include <QWidget>
 
-class QComboBox;
 class QLabel;
 class QStackedWidget;
 class QToolButton;
@@ -13,6 +12,7 @@ class QToolButton;
 namespace lf::ui {
 
 class ActionRegistry;
+enum class ActionId;
 class EmptyState;
 class PlaybackController;
 class PreviewWidget;
@@ -32,6 +32,8 @@ private:
     void updatePlaying(bool playing);
     void updateProgram();
     void updateStats(const playback::PlaybackStats& stats);
+    void updateRate(double rate);
+    QToolButton* menuButton(const QString& text, const QString& tip, std::initializer_list<ActionId> ids);
 
     ActionRegistry& m_actions;
     PlaybackController& m_playback;
@@ -42,7 +44,9 @@ private:
     QLabel* m_currentTime;
     QLabel* m_totalTime;
     QLabel* m_statsLabel;
-    QComboBox* m_quality;
+    QLabel* m_rateLabel;
+    QToolButton* m_qualityButton;
+    QToolButton* m_zoomButton;
     QToolButton* m_playButton;
     QToolButton* m_muteButton;
 };

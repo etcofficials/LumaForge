@@ -18,6 +18,7 @@ class QMenu;
 class QStackedWidget;
 class QTabBar;
 class QTimer;
+class QToolBar;
 
 namespace lf::hw { class GpuDevice; }
 namespace lf::playback { struct PlaybackStats; }
@@ -26,6 +27,7 @@ namespace lf::ui {
 
 class ActionRegistry;
 class BrowserPanel;
+class CommandPalette;
 class DiagnosticsDialog;
 class HomeScreen;
 class ImportController;
@@ -62,8 +64,10 @@ public:
     void openProjectFile(const QString& path);
 
     [[nodiscard]] ToastHost* toasts() const noexcept { return m_toasts; }
+    [[nodiscard]] project::Document& document() const noexcept { return *m_document; }
 
 protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
@@ -90,6 +94,12 @@ private:
     // Switches the preview to the timeline (no-op when already there).
     void showSequenceInPreview(TimePoint at);
     void onWorkspaceChanged(Workspace w);
+    void setToolbarGroupVisible(const QString& key, bool visible);
+    void ensurePreviewProgram();
+    void seekTimeline(TimePoint t);
+    void applyLoop();
+    void importFolderWithDialog();
+    void setViewerFullscreen(bool on);
 
     // Pages
     void showHome();
@@ -128,6 +138,20 @@ private:
     InspectorPanel* m_inspectorPanel = nullptr;
     TimelinePanel* m_timelinePanel = nullptr;
     QPointer<DiagnosticsDialog> m_diagnostics;
+
+    struct ToolbarGroup {
+        QString key;
+        QString name;
+        QList<QAction*> items;   // actions + widget actions + trailing separator
+    };
+    QToolBar* m_mainToolBar = nullptr;
+    std::vector<ToolbarGroup> m_toolbarGroups;
+    QLabel* m_toolbarHw = nullptr;
+    QLabel* m_toolbarFps = nullptr;
+    CommandPalette* m_palette = nullptr;
+    bool m_viewerFullscreen = false;
+    bool m_wasMaximized = false;
+    QByteArray m_preFullscreenState;
 
     QLabel* m_statusProject = nullptr;
     QLabel* m_statusTimecode = nullptr;

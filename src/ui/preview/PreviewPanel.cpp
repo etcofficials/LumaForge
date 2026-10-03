@@ -9,9 +9,9 @@
 #include "ui/widgets/EmptyState.h"
 
 #include <QAction>
-#include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
 #include <QSettings>
 #include <QStackedWidget>
 #include <QToolButton>
@@ -19,9 +19,6 @@
 
 namespace lf::ui {
 
-namespace {
-constexpr const char* kQualityKey = "preview/quality";
-}
 
 PreviewPanel::PreviewPanel(ActionRegistry& actions, PlaybackController& playback, QWidget* parent)
     : QWidget(parent), m_actions(actions), m_playback(playback) {
@@ -59,13 +56,20 @@ PreviewPanel::PreviewPanel(ActionRegistry& actions, PlaybackController& playback
     row->addWidget(m_sourceLabel);
     row->addStretch(1);
 
-    row->addWidget(transportButton(actions.action(ActionId::GoToStart)));
+    row->addWidget(transportButton(actions.action(ActionId::PrevEdit)));
     row->addWidget(transportButton(actions.action(ActionId::StepBack)));
     m_playButton = transportButton(actions.action(ActionId::PlayPause), true);
     row->addWidget(m_playButton);
     row->addWidget(transportButton(actions.action(ActionId::PlayStop)));
     row->addWidget(transportButton(actions.action(ActionId::StepForward)));
-    row->addWidget(transportButton(actions.action(ActionId::GoToEnd)));
+    row->addWidget(transportButton(actions.action(ActionId::NextEdit)));
+    row->addWidget(transportButton(actions.action(ActionId::PlayLoop)));
+    m_rateLabel = new QLabel(transport);
+    m_rateLabel->setProperty("timecode", true);
+    m_rateLabel->setToolTip(tr("Shuttle speed (J / K / L)"));
+    m_rateLabel->setFixedWidth(64);
+    m_rateLabel->setAlignment(Qt::AlignCenter);
+    row->addWidget(m_rateLabel);
 
     row->addStretch(1);
     m_statsLabel = new QLabel(transport);
@@ -87,21 +91,13 @@ PreviewPanel::PreviewPanel(ActionRegistry& actions, PlaybackController& playback
     });
     row->addWidget(m_muteButton);
 
-    m_quality = new QComboBox(transport);
-    m_quality->setToolTip(tr("Preview quality (does not affect export)"));
-    m_quality->setFocusPolicy(Qt::NoFocus);
-    for (auto q : {playback::PreviewQuality::Auto, playback::PreviewQuality::P360, playback::PreviewQuality::P480, playback::PreviewQuality::P720, playback::PreviewQuality::Full}) {
-        m_quality->addItem(QString::fromLatin1(playback::previewQualityName(q)), static_cast<int>(q));
-    }
-    const int savedQ = QSettings().value(QString::fromLatin1(kQualityKey), 0).toInt();
-    m_quality->setCurrentIndex(std::clamp(savedQ, 0, m_quality->count() - 1));
-    m_playback.setQuality(static_cast<playback::PreviewQuality>(m_quality->currentData().toInt()));
-    connect(m_quality, &QComboBox::currentIndexChanged, this, [this](int idx) {
-        const auto q = static_cast<playback::PreviewQuality>(m_quality->itemData(idx).toInt());
-        m_playback.setQuality(q);
-        QSettings().setValue(QString::fromLatin1(kQualityKey), idx);
-    });
-    row->addWidget(m_quality);
+    m_zoomButton = menuButton(tr("Fit"), tr("Viewer zoom (F = fit, 1 = 100%, 2 = 50%)"),
+                              {ActionId::ViewerZoomFit, ActionId::ViewerZoom25, ActionId::ViewerZoom50, ActionId::ViewerZoom100, ActionId::ViewerZoom200});
+    row->addWidget(m_zoomButton);
+    m_qualityButton = menuButton(tr("Auto"), tr("Preview quality: render resolution of the preview (does not affect export)"),
+                                 {ActionId::QualityAuto, ActionId::QualityFull, ActionId::QualityHalf, ActionId::QualityQuarter, ActionId::QualityEighth});
+    row->addWidget(m_qualityButton);
+    row->addWidget(transportButton(actions.action(ActionId::ViewerFullscreen)));
     row->addSpacing(6);
 
     m_totalTime = new QLabel(QStringLiteral("00:00:00:00"), transport);
@@ -109,11 +105,18 @@ PreviewPanel::PreviewPanel(ActionRegistry& actions, PlaybackController& playback
     m_totalTime->setToolTip(tr("Duration"));
     row->addWidget(m_totalTime);
     layout->addWidget(transport);
+    // Timecodes never get squeezed: their width is that of the widest value.
+    for (QLabel* l : {m_currentTime, m_totalTime}) {
+        l->ensurePolished();
+        l->setMinimumWidth(l->fontMetrics().horizontalAdvance(QStringLiteral("00:00:00:00")) + 12);
+    }
 
     connect(&m_playback, &PlaybackController::positionChanged, this, [this](TimePoint) { updateTime(); });
     connect(&m_playback, &PlaybackController::playingChanged, this, [this](bool p) { updatePlaying(p); });
     connect(&m_playback, &PlaybackController::programChanged, this, [this] { updateProgram(); });
     connect(&m_playback, &PlaybackController::statsChanged, this, [this](const playback::PlaybackStats& s) { updateStats(s); });
+    connect(&m_playback, &PlaybackController::rateChanged, this, &PreviewPanel::updateRate);
+    updateRate(1.0);
     updatePlaying(false);
     updateProgram();
 }
@@ -129,6 +132,30 @@ QToolButton* PreviewPanel::transportButton(QAction* action, bool emphasised) {
     const QString sc = action->shortcut().toString(QKeySequence::NativeText);
     b->setToolTip(sc.isEmpty() ? action->text().remove('&') : QStringLiteral("%1  (%2)").arg(action->text().remove('&'), sc));
     return b;
+}
+
+QToolButton* PreviewPanel::menuButton(const QString& text, const QString& tip, std::initializer_list<ActionId> ids) {
+    auto* b = new QToolButton(this);
+    b->setText(text);
+    b->setToolTip(tip);
+    b->setPopupMode(QToolButton::InstantPopup);
+    b->setFocusPolicy(Qt::NoFocus);
+    b->setMinimumWidth(52);
+    auto* menu = new QMenu(b);
+    for (auto id : ids) {
+        QAction* a = m_actions.action(id);
+        menu->addAction(a);
+        // The button shows the checked entry of its exclusive group.
+        connect(a, &QAction::toggled, b, [b, a](bool on) { if (on) b->setText(a->text().remove(QLatin1Char('&'))); });
+        if (a->isChecked()) b->setText(a->text().remove(QLatin1Char('&')));
+    }
+    b->setMenu(menu);
+    return b;
+}
+
+void PreviewPanel::updateRate(double rate) {
+    if (rate == 1.0) { m_rateLabel->clear(); return; }
+    m_rateLabel->setText(rate < 0 ? QStringLiteral("◀ %1×").arg(-rate) : QStringLiteral("%1× ▶").arg(rate));
 }
 
 void PreviewPanel::updateTime() {
@@ -153,7 +180,9 @@ void PreviewPanel::updateProgram() {
         default: m_sourceLabel->clear(); break;
     }
     const bool enabled = has;
-    for (auto id : {ActionId::PlayPause, ActionId::PlayStop, ActionId::StepBack, ActionId::StepForward, ActionId::GoToStart, ActionId::GoToEnd}) m_actions.setEnabled(id, enabled);
+    for (auto id : {ActionId::PlayPause, ActionId::Play, ActionId::Pause, ActionId::PlayStop, ActionId::ShuttleForward, ActionId::ShuttleReverse,
+                    ActionId::StepBack, ActionId::StepForward, ActionId::StepBackLarge, ActionId::StepForwardLarge, ActionId::GoToStart, ActionId::GoToEnd})
+        m_actions.setEnabled(id, enabled);
     updateTime();
 }
 

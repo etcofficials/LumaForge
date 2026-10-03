@@ -3,6 +3,7 @@
 #include "lumaforge/commands/Command.h"
 #include "lumaforge/project/Document.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -12,13 +13,20 @@ namespace lf::project {
 // Every timeline operation (drop, move, trim, split, delete, property edit)
 // is expressed as one of these, so there is exactly one undoable command type
 // for the timeline and the inverse is computed generically.
+struct SequenceMarks {
+    TimePoint in{-1};
+    TimePoint out{-1};
+    friend constexpr bool operator==(const SequenceMarks&, const SequenceMarks&) = default;
+};
+
 struct SequenceEdit {
     std::vector<Clip> added;        // inserted as given (ids pre-allocated)
     std::vector<ClipId> removed;
     std::vector<Clip> modified;     // complete new state of existing clips
     std::vector<Track> tracks;      // complete new state of existing tracks
+    std::optional<SequenceMarks> marks;   // new In/Out points
 
-    [[nodiscard]] bool empty() const noexcept { return added.empty() && removed.empty() && modified.empty() && tracks.empty(); }
+    [[nodiscard]] bool empty() const noexcept { return added.empty() && removed.empty() && modified.empty() && tracks.empty() && !marks; }
     // Affected clip ids (for change notifications and selection).
     [[nodiscard]] std::vector<ClipId> clipIds() const;
     void add(Clip c) { added.push_back(std::move(c)); }
@@ -54,6 +62,7 @@ private:
     std::vector<std::pair<std::size_t, Clip>> m_removedBefore;   // original index + clip
     std::vector<Clip> m_modifiedBefore;
     std::vector<Track> m_tracksBefore;
+    SequenceMarks m_marksBefore;
 };
 
 }  // namespace lf::project

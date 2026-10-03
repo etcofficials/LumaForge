@@ -34,6 +34,7 @@ public:
     [[nodiscard]] bool isPlaying() const;
     [[nodiscard]] QString sourceName() const { return m_sourceName; }
     [[nodiscard]] playback::PlaybackStats stats() const;
+    [[nodiscard]] double rate() const noexcept { return m_rate; }
 
 public slots:
     // Source monitor: play one media item.
@@ -41,9 +42,15 @@ public slots:
     void setProgram(std::shared_ptr<const lf::playback::Program> program, Mode mode, const QString& label, lf::TimePoint keepPosition = lf::TimePoint{-1});
     void clearProgram();
 
-    void play();
+    void play();                 // normal speed
     void pause();
     void togglePlay();
+    // J / L: each press doubles the speed in that direction (1x, 2x, 4x, 8x);
+    // pressing the other key first switches direction at 1x. K pauses.
+    void shuttleForward();
+    void shuttleReverse();
+    void setLoop(bool enabled, lf::TimePoint in, lf::TimePoint out);
+    void setViewZoom(double zoom);
     void stop();
     void seek(lf::TimePoint t, bool scrubbing = false);
     void stepFrames(int frames);
@@ -55,6 +62,7 @@ public slots:
 signals:
     void positionChanged(lf::TimePoint t);
     void playingChanged(bool playing);
+    void rateChanged(double rate);   // 1 at normal speed, negative in reverse
     void statsChanged(const lf::playback::PlaybackStats& stats);
     void programChanged();      // mode/duration/frame rate may have changed
     void errorOccurred(const QString& message);
@@ -65,6 +73,8 @@ private:
     Mode m_mode = Mode::None;
     QString m_sourceName;
     std::shared_ptr<const playback::Program> m_program;
+    double m_rate = 1.0;
+    void playAt(double rate);
 };
 
 }  // namespace lf::ui

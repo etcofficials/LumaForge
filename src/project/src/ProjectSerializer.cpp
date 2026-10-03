@@ -227,11 +227,12 @@ std::string toJson(const Project& project, const std::string& projectDir) {
         json j = {{"id", raw(c.id)}, {"track", raw(c.track)}, {"kind", clipKindKey(c.kind)}, {"media", raw(c.media)}, {"name", c.name},
                   {"start", c.start.ticks}, {"duration", c.duration.ticks}, {"sourceIn", c.sourceIn.ticks}, {"speed", rational(c.speed)},
                   {"link", raw(c.link)}, {"transform", write(c.transform)}, {"crop", write(c.crop)}, {"color", write(c.color)},
-                  {"effects", write(c.effects)}, {"audio", write(c.audio)}};
+                  {"effects", write(c.effects)}, {"audio", write(c.audio)}, {"enabled", c.enabled}};
         if (c.kind == ClipKind::Text) j["text"] = write(c.text);
         clips.push_back(std::move(j));
     }
-    root["sequence"] = {{"tracks", std::move(tracks)}, {"clips", std::move(clips)}};
+    root["sequence"] = {{"tracks", std::move(tracks)}, {"clips", std::move(clips)},
+                        {"markIn", project.sequence.markIn.ticks}, {"markOut", project.sequence.markOut.ticks}};
     return root.dump(2);
 }
 
@@ -302,6 +303,7 @@ Result<LoadResult> fromJson(const std::string& text, const std::string& projectD
                 get(j, "kind", kind);
                 c.kind = kind == "audio" ? ClipKind::Audio : kind == "image" ? ClipKind::Image : kind == "text" ? ClipKind::Text : ClipKind::Video;
                 getTicks(j, "start", c.start); getTicks(j, "duration", c.duration); getTicks(j, "sourceIn", c.sourceIn); getRational(j, "speed", c.speed);
+                get(j, "enabled", c.enabled);
                 if (auto s = j.find("transform"); s != j.end()) read(*s, c.transform);
                 if (auto s = j.find("crop"); s != j.end()) read(*s, c.crop);
                 if (auto s = j.find("color"); s != j.end()) read(*s, c.color);
@@ -319,6 +321,12 @@ Result<LoadResult> fromJson(const std::string& text, const std::string& projectD
                 }
                 p.sequence.clips.push_back(std::move(c));
             }
+        }
+        getTicks(*seq, "markIn", p.sequence.markIn);
+        getTicks(*seq, "markOut", p.sequence.markOut);
+        if (!p.sequence.hasInOut() && (p.sequence.markIn.ticks >= 0 || p.sequence.markOut.ticks >= 0)) {
+            // A single mark is fine; an inverted pair is not.
+            if (p.sequence.markIn.ticks >= 0 && p.sequence.markOut.ticks >= 0) p.sequence.markIn = p.sequence.markOut = TimePoint{-1};
         }
         // Links must be symmetric and point at existing clips.
         for (auto& c : p.sequence.clips) {

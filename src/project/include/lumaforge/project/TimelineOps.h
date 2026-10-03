@@ -73,6 +73,33 @@ std::vector<Clip> cloneClips(Document& doc, const std::vector<Clip>& source, Dur
 // same source range at the new speed, overwriting neighbours when it grows.
 SequenceEdit setSpeed(Document& doc, const std::vector<ClipId>& ids, Rational speed);
 
+// Ripple trim: trims one edge (like trimClip) and shifts every clip that
+// starts at or after the clip's original end on unlocked tracks by the change
+// in length, so nothing after the edit overlaps or leaves a gap. A shortening
+// is limited so no shifted clip collides with an unshifted one.
+SequenceEdit rippleTrim(Document& doc, ClipId id, Edge edge, TimePoint time);
+
+// Roll edit: moves the cut between `left` (ending at the cut) and `right`
+// (starting there) on one track to `time`; the total length is unchanged.
+// Clamped to a frame per side and to the media each clip has available.
+// Linked partners that share the same cut roll with them.
+SequenceEdit rollEdit(Document& doc, ClipId left, ClipId right, TimePoint time);
+
+// The clips directly left and right of the cut nearest to `t` on `track`
+// within `tolerance` (both must exist and touch).
+std::optional<std::pair<ClipId, ClipId>> cutAt(const Sequence& seq, TrackId track, TimePoint t, Duration tolerance);
+
+// Lift: removes everything inside `range` on unlocked tracks (gap stays).
+SequenceEdit liftRange(Document& doc, TimeRange range);
+// Extract: lift + every clip after the range on unlocked tracks moves left by its length.
+SequenceEdit extractRange(Document& doc, TimeRange range);
+
+// Every clip start/end on the sequence plus zero, sorted, unique.
+std::vector<TimePoint> editPoints(const Sequence& seq);
+// Nearest edit point strictly before / after t (nullopt at the ends).
+std::optional<TimePoint> previousEditPoint(const Sequence& seq, TimePoint t);
+std::optional<TimePoint> nextEditPoint(const Sequence& seq, TimePoint t);
+
 // Clip ids plus their linked partners (deduplicated).
 std::vector<ClipId> withLinked(const Sequence& seq, const std::vector<ClipId>& ids);
 

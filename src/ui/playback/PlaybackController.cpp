@@ -25,7 +25,13 @@ PlaybackController::PlaybackController(std::shared_ptr<hw::GpuDevice> gpu, bool 
     QPointer<PlaybackController> self(this);
     playback::PlaybackEngine::Callbacks cb;
     cb.positionChanged = [self](TimePoint t) { QMetaObject::invokeMethod(self, [self, t] { if (self) emit self->positionChanged(t); }, Qt::QueuedConnection); };
-    cb.playingChanged = [self](bool p) { QMetaObject::invokeMethod(self, [self, p] { if (self) emit self->playingChanged(p); }, Qt::QueuedConnection); };
+    cb.playingChanged = [self](bool p) {
+        QMetaObject::invokeMethod(self, [self, p] {
+            if (!self) return;
+            if (!p && self->m_rate != 1.0) { self->m_rate = 1.0; emit self->rateChanged(1.0); }
+            emit self->playingChanged(p);
+        }, Qt::QueuedConnection);
+    };
     cb.statsChanged = [self](const playback::PlaybackStats& s) { QMetaObject::invokeMethod(self, [self, s] { if (self) emit self->statsChanged(s); }, Qt::QueuedConnection); };
     cb.error = [self](const std::string& m) { QMetaObject::invokeMethod(self, [self, m] { if (self) emit self->errorOccurred(QString::fromStdString(m)); }, Qt::QueuedConnection); };
     m_engine->setCallbacks(std::move(cb));
@@ -55,9 +61,37 @@ void PlaybackController::setProgram(std::shared_ptr<const playback::Program> pro
 
 void PlaybackController::clearProgram() { setProgram(nullptr, Mode::None, QString()); }
 
-void PlaybackController::play() { if (m_engine) m_engine->play(); }
-void PlaybackController::pause() { if (m_engine) m_engine->pause(); }
-void PlaybackController::togglePlay() { if (m_engine) m_engine->togglePlay(); }
+void PlaybackController::playAt(double rate) {
+    if (!m_engine) return;
+    m_engine->play(rate);
+    if (rate != m_rate) { m_rate = rate; emit rateChanged(rate); }
+}
+
+void PlaybackController::play() { playAt(1.0); }
+
+void PlaybackController::pause() {
+    if (!m_engine) return;
+    m_engine->pause();
+    if (m_rate != 1.0) { m_rate = 1.0; emit rateChanged(1.0); }
+}
+
+void PlaybackController::togglePlay() {
+    if (isPlaying()) pause();
+    else play();
+}
+
+void PlaybackController::shuttleForward() {
+    if (!isPlaying() || m_rate < 0) playAt(1.0);
+    else playAt(std::min(8.0, m_rate * 2.0));
+}
+
+void PlaybackController::shuttleReverse() {
+    if (!isPlaying() || m_rate > 0) playAt(-1.0);
+    else playAt(std::max(-8.0, m_rate * 2.0));
+}
+
+void PlaybackController::setLoop(bool enabled, TimePoint in, TimePoint out) { if (m_engine) m_engine->setLoop(enabled, in, out); }
+void PlaybackController::setViewZoom(double zoom) { if (m_engine) m_engine->setViewZoom(zoom); }
 void PlaybackController::stop() { if (m_engine) m_engine->stop(); }
 void PlaybackController::seek(TimePoint t, bool scrubbing) { if (m_engine) m_engine->seek(t, scrubbing); }
 void PlaybackController::stepFrames(int frames) { if (m_engine) m_engine->stepFrames(frames); }

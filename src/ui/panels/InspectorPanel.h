@@ -34,6 +34,10 @@ public:
     void pushEdit(const QString& undoText, const EditBuilder& build) override;
     [[nodiscard]] const project::Project& project() const override { return m_doc.project(); }
 
+    // Expands and scrolls to the section with `key` if it is shown; false otherwise.
+    bool revealSection(const QString& key);
+    [[nodiscard]] bool hasSection(const QString& key) const;
+
 public slots:
     void setSelection(const std::vector<lf::project::ClipId>& ids);
 

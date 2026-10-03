@@ -24,6 +24,8 @@ public:
     void setExpanded(bool expanded);
     [[nodiscard]] bool isExpanded() const noexcept { return m_expanded; }
     void setSubtitle(const QString& text);
+    // The key passed at construction ("transform", "color"...).
+    [[nodiscard]] QString sectionKey() const { return m_key.section(QLatin1Char('/'), -1); }
 
 signals:
     void toggled(bool expanded);

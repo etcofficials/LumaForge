@@ -20,6 +20,7 @@ struct Change {
         MediaChanged,
         TracksChanged,    // track added/removed/reordered/muted/locked
         ClipsChanged,     // any clip geometry or property change
+        MarksChanged,     // sequence In/Out points (and markers)
     };
     Kind kind;
     std::vector<MediaId> mediaIds;

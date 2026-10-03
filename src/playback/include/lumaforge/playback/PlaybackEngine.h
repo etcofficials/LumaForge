@@ -24,7 +24,9 @@ namespace lf::playback {
 class AudioMixer;
 class VideoReader;
 
-enum class PreviewQuality { Auto, P360, P480, P720, Full };
+// Render resolution of the preview. Auto follows the viewer size (720p cap while
+// playing); the fractions are of the project resolution.
+enum class PreviewQuality { Auto, Full, Half, Quarter, Eighth };
 [[nodiscard]] const char* previewQualityName(PreviewQuality q) noexcept;
 
 struct PlaybackStats {
@@ -66,7 +68,10 @@ public:
     // Program + transport
     void setProgram(std::shared_ptr<const Program> program, TimePoint keepPosition = TimePoint{-1});
     [[nodiscard]] std::shared_ptr<const Program> program() const;
-    void play();
+    // Plays at `rate` (1 = normal, 2/4/8 = fast forward, negative = reverse).
+    // Audio is heard only at normal speed. Calling it while playing changes the
+    // rate from the current position.
+    void play(double rate = 1.0);
     void pause();
     void togglePlay();
     void stop();                         // pause and return to where play started
@@ -74,9 +79,16 @@ public:
     void stepFrames(int frames);
     void setQuality(PreviewQuality q);
     void setMuted(bool muted);
+    // Loop playback: at the end of the range playback jumps back to its start.
+    // in/out < 0 mean the start / end of the program.
+    void setLoop(bool enabled, TimePoint in = TimePoint{-1}, TimePoint out = TimePoint{-1});
+    // Viewer magnification: <= 0 fits the frame to the surface; 1 = one frame
+    // pixel per screen pixel. Pan is in surface pixels from the centre.
+    void setViewZoom(double zoom, int panX = 0, int panY = 0);
 
     [[nodiscard]] TimePoint position() const noexcept { return TimePoint{m_position.load()}; }
     [[nodiscard]] bool isPlaying() const noexcept { return m_playing.load(); }
+    [[nodiscard]] double rate() const noexcept { return m_rate.load(); }
     [[nodiscard]] PreviewQuality quality() const noexcept { return m_quality.load(); }
     [[nodiscard]] PlaybackStats stats() const;
     [[nodiscard]] render::Compositor& compositor() noexcept { return *m_compositor; }
@@ -132,11 +144,17 @@ private:
     std::unordered_map<std::uint64_t, TextEntry> m_textCache;
     std::uint64_t m_textUseCounter = 0;
     std::vector<VideoLayerRequest> m_layerRequests;
+    std::vector<VideoLayerRequest> m_prerollRequests;
     std::vector<render::Layer> m_layers;
 
     std::atomic<Ticks> m_position{0};
     std::atomic<bool> m_playing{false};
     std::atomic<PreviewQuality> m_quality{PreviewQuality::Auto};
+    std::atomic<double> m_rate{1.0};
+    bool m_loop = false;
+    TimePoint m_loopIn{-1}, m_loopOut{-1};
+    double m_viewZoom = 0.0;
+    int m_panX = 0, m_panY = 0;
     TimePoint m_playOrigin;                 // program time when play started
     std::chrono::steady_clock::time_point m_playWall;
     TimePoint m_stopReturn;                 // where Stop returns to

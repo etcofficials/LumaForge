@@ -27,7 +27,7 @@ class WaveformService;
 // The editing tool decides what a press in the lane area does. Tools are a
 // property of the view (set from the ActionRegistry's tool actions), never
 // implemented as separate widgets.
-enum class EditTool { Select, Blade };
+enum class EditTool { Select, Blade, Trim, Hand, Zoom, Text };
 
 class TimelineView : public QWidget {
     Q_OBJECT
@@ -52,6 +52,9 @@ public:
     [[nodiscard]] bool hasSelection() const noexcept { return !m_selection.empty(); }
     // Clip under the playhead (strictly inside) on any unlocked track?
     [[nodiscard]] bool canSplitAtPlayhead() const;
+    [[nodiscard]] bool canTrimToPlayhead() const;
+    // True when every selected clip is enabled (drives the Enable action's check state).
+    [[nodiscard]] bool selectionEnabled() const;
 
     // Visible range in ticks; used by the external scrollbar.
     [[nodiscard]] Ticks scrollOffset() const noexcept { return m_scrollTicks; }
@@ -79,9 +82,25 @@ public slots:
     void splitAtPlayhead();
     void deleteSelection(bool ripple);
     void copySelection();
-    void paste();              // at the playhead
+    void cutSelection();       // copy + delete, one undo step
+    void paste();              // insert at the playhead (later clips move right)
+    void pasteOverwrite();     // at the playhead, replacing what is underneath
     void duplicateSelection();
     void addTextClip();        // 5 s title at the playhead on the top video track
+    void addTextClipAt(lf::project::TrackId track, lf::TimePoint at);
+    void nudgeSelection(int frames);
+    void moveSelectionToPlayhead();
+    void trimSelectionToPlayhead(bool start);
+    void toggleSelectionEnabled();
+    void toggleSelectionAudioMute();
+    [[nodiscard]] bool selectionHasAudio() const;
+    [[nodiscard]] bool selectionAudioMuted() const;
+    [[nodiscard]] bool selectionHasVisual() const;
+    void setMarkIn(lf::TimePoint t);
+    void setMarkOut(lf::TimePoint t);
+    void clearInOut();
+    void liftInOut();
+    void extractInOut();
     // Adds media at the given time on the default tracks (V1/A1), or at the
     // sequence end when time < 0. Returns the created visual/audio clip ids.
     std::vector<lf::project::ClipId> addMedia(const QList<lf::project::MediaId>& ids, lf::TimePoint at);
@@ -130,7 +149,8 @@ private:
         int minorDivisions;
         bool labelFrames;
     };
-    enum class Gesture { None, Scrub, PendingClip, Move, TrimStart, TrimEnd, PendingMarquee, Marquee };
+    enum class Gesture { None, Scrub, PendingClip, Move, TrimStart, TrimEnd, PendingMarquee, Marquee,
+                         RippleStart, RippleEnd, Roll, Pan, PendingZoom, ZoomRange };
     struct Hit {
         project::ClipId clip = project::ClipId::Invalid;
         bool nearStart = false;
@@ -190,6 +210,9 @@ private:
     void bladeClick(const QPoint& pos, project::ClipId clip);
     void selectAdded(const project::SequenceEdit& edit, const QString& text);
     void updateTrimPreview(const QPoint& pos);
+    void updateTrimToolPreview(const QPoint& pos);
+    void pressTrimTool(const QPoint& pos, const Hit& hit);
+    void paintInOut(QPainter& p, const QRect& ruler, const QRect& lanes);
     void finishGesture(bool commitEdit);
     [[nodiscard]] std::optional<TimePoint> snapped(TimePoint t, const std::vector<project::ClipId>& ignore) const;
     void autoScrollTowards(int x);
@@ -218,6 +241,8 @@ private:
     QPoint m_pressPos;
     Qt::KeyboardModifiers m_pressMods;
     project::ClipId m_pressClip = project::ClipId::Invalid;
+    project::ClipId m_rollRight = project::ClipId::Invalid;   // roll gesture: clip right of the cut (m_pressClip is left)
+    Ticks m_pressScroll = 0;
     bool m_pressWasSelected = false;
     std::optional<project::SequenceEdit> m_previewEdit;   // move/trim result shown live
     std::vector<project::ClipId> m_previewIds;            // clips being moved/trimmed (drawn as ghosts)

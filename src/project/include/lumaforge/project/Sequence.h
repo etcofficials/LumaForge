@@ -47,6 +47,7 @@ struct Clip {
     TimePoint sourceIn;
     Rational speed{1, 1};                // >0; 2/1 = double speed
     ClipId link = ClipId::Invalid;       // A/V partner created from the same media
+    bool enabled = true;                 // disabled clips stay on the timeline but are not rendered or heard
 
     Transform2D transform;
     Crop crop;
@@ -77,6 +78,10 @@ struct Clip {
 struct Sequence {
     std::vector<Track> tracks;
     std::vector<Clip> clips;
+    TimePoint markIn{-1};    // In/Out range (loop, lift/extract, export range); -1 = unset
+    TimePoint markOut{-1};
+
+    [[nodiscard]] bool hasInOut() const noexcept { return markIn.ticks >= 0 && markOut.ticks > markIn.ticks; }
 
     [[nodiscard]] const Track* findTrack(TrackId id) const noexcept { for (const auto& t : tracks) if (t.id == id) return &t; return nullptr; }
     [[nodiscard]] Track* findTrack(TrackId id) noexcept { for (auto& t : tracks) if (t.id == id) return &t; return nullptr; }

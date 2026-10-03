@@ -29,6 +29,8 @@ qt_add_library(lf_ui STATIC
     timeline/TimelineView.h timeline/TimelineView.cpp
     timeline/TimelinePanel.h timeline/TimelinePanel.cpp
     dialogs/DiagnosticsDialog.h dialogs/DiagnosticsDialog.cpp
+    dialogs/CommandPalette.h dialogs/CommandPalette.cpp
+    dialogs/ShortcutEditor.h dialogs/ShortcutEditor.cpp
     dialogs/MediaPropertiesDialog.h dialogs/MediaPropertiesDialog.cpp
     dialogs/ProjectSettingsDialog.h dialogs/ProjectSettingsDialog.cpp
     project/ProjectController.h project/ProjectController.cpp
@@ -88,4 +90,21 @@ qt_add_resources(lf_ui "lf_ui_resources"
         "${CMAKE_SOURCE_DIR}/resources/icons/tool-select.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/tool-blade.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/text.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/tool-trim.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/tool-hand.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/tool-zoom.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/loop.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/edit-prev.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/edit-next.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/fullscreen.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/cut.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/copy.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/paste.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/mark-in.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/mark-out.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/save-as.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/snapshot.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/keyboard.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/settings.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/marker.svg"
 )

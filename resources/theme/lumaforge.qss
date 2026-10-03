@@ -328,3 +328,11 @@ QTabBar#workspaceTabs::tab:hover:!selected { color: {{text.primary}}; background
 QTabWidget#browserTabs::pane { border: none; }
 QStatusBar QLabel[statusField="true"] { border-left: 1px solid {{border}}; }
 QWidget#homeScreen QPushButton { padding: 6px 12px; }
+QLabel[chip="true"] {
+    color: {{text.secondary}};
+    background: {{bg.panel}};
+    border: 1px solid {{border}};
+    border-radius: 9px;
+    padding: 1px 8px;
+    margin: 0 3px;
+}

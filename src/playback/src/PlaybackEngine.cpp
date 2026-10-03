@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 namespace lf::playback {
 
@@ -23,10 +24,10 @@ constexpr int kMixerChannels = 2;
 const char* previewQualityName(PreviewQuality q) noexcept {
     switch (q) {
         case PreviewQuality::Auto: return "Auto";
-        case PreviewQuality::P360: return "360p";
-        case PreviewQuality::P480: return "480p";
-        case PreviewQuality::P720: return "720p";
         case PreviewQuality::Full: return "Full";
+        case PreviewQuality::Half: return "1/2";
+        case PreviewQuality::Quarter: return "1/4";
+        case PreviewQuality::Eighth: return "1/8";
     }
     return "?";
 }
@@ -147,24 +148,32 @@ std::shared_ptr<const Program> PlaybackEngine::program() const {
     return m_program;
 }
 
-void PlaybackEngine::play() {
+void PlaybackEngine::play(double rate) {
+    if (rate == 0.0) { pause(); return; }
+    bool wasPlaying = false;
     {
         std::lock_guard lock(m_mutex);
-        if (!m_program || m_playing.load()) return;
-        Ticks pos = m_position.load();
-        if (pos >= m_program->duration().ticks) pos = 0;   // replay from the start when at the end
+        if (!m_program) return;
+        wasPlaying = m_playing.load();
+        Ticks pos = wasPlaying ? std::clamp<Ticks>(clockNow().ticks, 0, m_program->duration().ticks) : m_position.load();
+        // Replay from the start when at the end (or from the end when reversing at the start).
+        if (!wasPlaying && rate > 0 && pos >= m_program->duration().ticks) pos = 0;
+        if (!wasPlaying && rate < 0 && pos <= 0) pos = m_program->duration().ticks;
         m_position = pos;
         m_playOrigin = TimePoint{pos};
-        m_stopReturn = TimePoint{pos};
+        if (!wasPlaying) m_stopReturn = TimePoint{pos};
         m_playWall = Clock::now();
+        m_rate = rate;
         m_playing = true;
         m_fpsCounter = 0;
         m_fpsWindowStart = Clock::now();
+        m_retryCount = 0;
     }
     m_mixer->setTime(position());
-    m_mixer->setPlaying(true);
-    LF_LOG_DEBUG(kLog, "play from {:.3f} s", position().toSeconds());
-    if (m_callbacks.playingChanged) m_callbacks.playingChanged(true);
+    // Shuttle speeds are silent: pitch-shifted 8x audio is noise, not information.
+    m_mixer->setPlaying(rate == 1.0);
+    LF_LOG_DEBUG(kLog, "play from {:.3f} s at {}x", position().toSeconds(), rate);
+    if (!wasPlaying && m_callbacks.playingChanged) m_callbacks.playingChanged(true);
     wake();
 }
 
@@ -172,8 +181,9 @@ void PlaybackEngine::pause() {
     bool was = false;
     {
         std::lock_guard lock(m_mutex);
+        if (m_playing.load()) m_position = std::clamp<Ticks>(clockNow().ticks, 0, m_program ? m_program->duration().ticks : 0);
         was = m_playing.exchange(false);
-        if (was) m_position = std::clamp<Ticks>(clockNow().ticks, 0, m_program ? m_program->duration().ticks : 0);
+        m_rate = 1.0;
         m_redraw = true;
         m_retryCount = 0;
     }
@@ -235,6 +245,23 @@ void PlaybackEngine::setQuality(PreviewQuality q) {
 
 void PlaybackEngine::setMuted(bool muted) { m_mixer->setMuted(muted); }
 
+void PlaybackEngine::setLoop(bool enabled, TimePoint in, TimePoint out) {
+    std::lock_guard lock(m_mutex);
+    m_loop = enabled;
+    m_loopIn = in;
+    m_loopOut = out;
+}
+
+void PlaybackEngine::setViewZoom(double zoom, int panX, int panY) {
+    {
+        std::lock_guard lock(m_mutex);
+        m_viewZoom = zoom;
+        m_panX = panX;
+        m_panY = panY;
+    }
+    requestRedraw();
+}
+
 PlaybackStats PlaybackEngine::stats() const {
     std::lock_guard lock(m_mutex);
     return m_stats;
@@ -243,7 +270,7 @@ PlaybackStats PlaybackEngine::stats() const {
 TimePoint PlaybackEngine::clockNow() const {
     // Steady clock is the master; the audio mixer is re-aligned on play/seek.
     const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - m_playWall).count();
-    return TimePoint{m_playOrigin.ticks + static_cast<Ticks>(elapsed * (kFlicksPerSecond / 1'000'000'000.0))};
+    return TimePoint{m_playOrigin.ticks + static_cast<Ticks>(elapsed * m_rate.load() * (kFlicksPerSecond / 1'000'000'000.0))};
 }
 
 void PlaybackEngine::notifyPosition(TimePoint t, bool force) {
@@ -340,17 +367,22 @@ void PlaybackEngine::ensureTarget(int frameW, int frameH) {
         if (frameH > targetH) { w = std::max(2, static_cast<int>(static_cast<std::int64_t>(frameW) * targetH / frameH)) & ~1; h = targetH; }
     };
     switch (m_quality.load()) {
-        case PreviewQuality::P360: scaleToHeight(360); break;
-        case PreviewQuality::P480: scaleToHeight(480); break;
-        case PreviewQuality::P720: scaleToHeight(720); break;
         case PreviewQuality::Full: break;
+        case PreviewQuality::Half: scaleToHeight(std::max(90, frameH / 2)); break;
+        case PreviewQuality::Quarter: scaleToHeight(std::max(90, frameH / 4)); break;
+        case PreviewQuality::Eighth: scaleToHeight(std::max(90, frameH / 8)); break;
         case PreviewQuality::Auto: {
-            // Never render more pixels than the surface can show; on top of
-            // that, cap at 720p while playing on this class of hardware.
-            const int surfaceH = m_surface ? m_surface->height() : 720;
-            const int surfaceW = m_surface ? m_surface->width() : 1280;
-            int capH = std::min(frameH, std::max(180, surfaceH));
-            if (frameW * surfaceH > surfaceW * frameH) capH = std::min(capH, std::max(180, static_cast<int>(static_cast<std::int64_t>(surfaceW) * frameH / frameW)));
+            // Never render more pixels than the surface shows; on top of that,
+            // cap at 720p while playing on this class of hardware.
+            int capH = frameH;
+            if (m_viewZoom > 0.0) {
+                capH = std::min(frameH, std::max(180, static_cast<int>(frameH * m_viewZoom)));
+            } else {
+                const int surfaceH = m_surface ? m_surface->height() : 720;
+                const int surfaceW = m_surface ? m_surface->width() : 1280;
+                capH = std::min(frameH, std::max(180, surfaceH));
+                if (frameW * surfaceH > surfaceW * frameH) capH = std::min(capH, std::max(180, static_cast<int>(static_cast<std::int64_t>(surfaceW) * frameH / frameW)));
+            }
             if (m_playing.load()) capH = std::min(capH, 720);
             scaleToHeight(capH);
             break;
@@ -415,13 +447,33 @@ void PlaybackEngine::renderOnce(TimePoint t, bool vsync) {
     // Look-ahead hint: readers decode towards where playback is going.
     if (m_playing.load()) {
         for (const auto& req : m_layerRequests) if (!req.path.empty()) readerFor(req).hint(req.sourceTime);
+        // Pre-roll: clips starting within the next half second (in the direction of
+        // travel) get their reader opened and positioned now, so a cut does not show
+        // a cold decoder's first-frame latency.
+        const double rate = m_rate.load();
+        const Ticks ahead = static_cast<Ticks>(kFlicksPerSecond / 2 * (rate < 0 ? -1.0 : 1.0) * std::max(1.0, std::abs(rate)));
+        const Ticks future = std::clamp<Ticks>(t.ticks + ahead, 0, std::max<Ticks>(0, dur - 1));
+        m_prerollRequests.clear();
+        m_program->videoLayersAt(TimePoint{future}, m_prerollRequests);
+        for (const auto& req : m_prerollRequests) {
+            if (req.path.empty()) continue;
+            const bool current = std::any_of(m_layerRequests.begin(), m_layerRequests.end(), [&](const VideoLayerRequest& r) { return r.layerKey == req.layerKey; });
+            if (!current) readerFor(req).hint(req.sourceTime);
+        }
     }
 
     if (auto s = m_compositor->compose(*m_target, fw, fh, m_layers, render::Rgba{0, 0, 0, 1}); !s) {
         LF_LOG_WARN(kLog, "compose failed: {}", s.error().fullText());
         return;
     }
-    const render::IntRect dst = render::fitFrame(m_surface->width(), m_surface->height(), fw, fh);
+    render::IntRect dst = render::fitFrame(m_surface->width(), m_surface->height(), fw, fh);
+    if (m_viewZoom > 0.0) {
+        // Magnified: frame pixels map to screen pixels by the zoom, centred plus pan;
+        // the rasteriser clips whatever falls outside the surface.
+        const int w = std::max(2, static_cast<int>(fw * m_viewZoom));
+        const int h = std::max(2, static_cast<int>(fh * m_viewZoom));
+        dst = render::IntRect{(m_surface->width() - w) / 2 + m_panX, (m_surface->height() - h) / 2 + m_panY, w, h};
+    }
     const render::Rgba surround{0.086f, 0.094f, 0.106f, 1.0f};
     if (auto s = m_compositor->blit(*m_target, m_surface->backBuffer(), m_surface->width(), m_surface->height(), dst, surround); !s) {
         LF_LOG_WARN(kLog, "blit failed: {}", s.error().fullText());
@@ -457,11 +509,16 @@ void PlaybackEngine::threadMain() {
         {
             std::unique_lock lock(m_mutex);
             if (m_playing.load()) {
-                // Sleep until the next frame boundary is due.
+                // Sleep until the next frame boundary is due. Shuttle speeds render
+                // at most one frame per project frame period of wall time.
                 const Ticks fd = m_program ? frameDuration(m_program->frameRate()).ticks : frameDuration(fps::f30).ticks;
-                const Ticks now = clockNow().ticks;
-                const Ticks nextFrame = ((now / fd) + 1) * fd;
-                const auto waitNs = std::chrono::nanoseconds(static_cast<long long>((nextFrame - now) * (1'000'000'000.0 / kFlicksPerSecond)));
+                const double rate = m_rate.load();
+                long long waitTicks = fd;
+                if (rate == 1.0) {
+                    const Ticks now = clockNow().ticks;
+                    waitTicks = ((now / fd) + 1) * fd - now;
+                }
+                const auto waitNs = std::chrono::nanoseconds(static_cast<long long>(waitTicks * (1'000'000'000.0 / kFlicksPerSecond)));
                 m_cv.wait_for(lock, waitNs, [&] { return m_stop || m_redraw || m_surfaceDirty; });
             } else if (m_retryRender && m_retryCount < kMaxRetries) {
                 // Paused, but the last frame was incomplete (a reader was still
@@ -485,16 +542,34 @@ void PlaybackEngine::threadMain() {
             if (playing) {
                 TimePoint now = clockNow();
                 const Ticks dur = m_program ? m_program->duration().ticks : 0;
-                if (now.ticks >= dur) {
-                    now = TimePoint{dur};
-                    m_position = dur;
+                const double rate = m_rate.load();
+                // Loop range: In/Out when both are set and valid, else the whole program.
+                Ticks rangeStart = 0, rangeEnd = dur;
+                if (m_loop && m_loopIn.ticks >= 0 && m_loopOut.ticks > m_loopIn.ticks) {
+                    rangeStart = std::clamp<Ticks>(m_loopIn.ticks, 0, dur);
+                    rangeEnd = std::clamp<Ticks>(m_loopOut.ticks, 0, dur);
+                }
+                const bool pastEnd = rate > 0 && now.ticks >= (m_loop ? rangeEnd : dur);
+                const bool pastStart = rate < 0 && now.ticks <= (m_loop ? rangeStart : 0);
+                if ((pastEnd || pastStart) && m_loop && rangeEnd > rangeStart) {
+                    const Ticks restart = rate > 0 ? rangeStart : rangeEnd - 1;
+                    m_playOrigin = TimePoint{restart};
+                    m_playWall = Clock::now();
+                    m_position = restart;
+                    lock.unlock();
+                    m_mixer->setTime(TimePoint{restart});
+                    lock.lock();
+                } else if (pastEnd || pastStart) {
+                    const Ticks stopAt = pastEnd ? dur : 0;
+                    m_position = stopAt;
                     m_playing = false;
+                    m_rate = 1.0;
                     playing = false;
                     lock.unlock();
                     m_mixer->setPlaying(false);
-                    LF_LOG_DEBUG(kLog, "reached end at {:.3f} s", TimePoint{dur}.toSeconds());
+                    LF_LOG_DEBUG(kLog, "reached {} at {:.3f} s", pastEnd ? "end" : "start", TimePoint{stopAt}.toSeconds());
                     if (m_callbacks.playingChanged) m_callbacks.playingChanged(false);
-                    notifyPosition(TimePoint{dur}, true);
+                    notifyPosition(TimePoint{stopAt}, true);
                     lock.lock();
                     redraw = true;
                 } else {
@@ -519,11 +594,15 @@ void PlaybackEngine::threadMain() {
         if (playing || redraw) {
             // Frame pacing: when we are more than a frame late, count a drop
             // (we render the current time rather than every missed frame).
-            if (playing && m_program) {
+            // Only normal-speed playback can drop frames; shuttle skips by design.
+            static thread_local Ticks lastRendered = -1;
+            if (playing && m_program && m_rate.load() == 1.0) {
                 const Ticks fd = frameDuration(m_program->frameRate()).ticks;
-                static thread_local Ticks lastRendered = -1;
-                if (lastRendered >= 0 && renderTime.ticks - lastRendered >= 2 * fd) m_stats.droppedFrames += static_cast<std::uint64_t>((renderTime.ticks - lastRendered) / fd - 1);
+                const Ticks gap = renderTime.ticks - lastRendered;
+                if (lastRendered >= 0 && gap >= 2 * fd && gap < 4 * kFlicksPerSecond) m_stats.droppedFrames += static_cast<std::uint64_t>(gap / fd - 1);
                 lastRendered = renderTime.ticks;
+            } else {
+                lastRendered = -1;
             }
             pruneReaders();
             renderOnce(renderTime, playing && !m_scrubbing);

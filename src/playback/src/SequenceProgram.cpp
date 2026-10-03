@@ -15,7 +15,7 @@ SequenceProgram::SequenceProgram(const Project& project)
         std::vector<VisualEntry> entries;
         if (!track->muted) {
             for (const Clip& c : seq.clips) {
-                if (c.track != track->id || !isVisualClip(c.kind)) continue;
+                if (c.track != track->id || !isVisualClip(c.kind) || !c.enabled) continue;
                 VisualEntry e;
                 e.clip = c;
                 if (c.kind != ClipKind::Text) {
@@ -36,7 +36,7 @@ SequenceProgram::SequenceProgram(const Project& project)
     for (const Track* track : seq.audioTracks()) {
         if (track->muted || (anySolo && !track->solo)) continue;
         for (const Clip& c : seq.clips) {
-            if (c.track != track->id || c.kind != ClipKind::Audio) continue;
+            if (c.track != track->id || c.kind != ClipKind::Audio || !c.enabled) continue;
             const MediaItem* item = project.findMedia(c.media);
             if (!item || item->offline || !item->info.hasAudio()) continue;
             m_audioClips.push_back({c, item->path});

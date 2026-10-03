@@ -457,6 +457,177 @@ SequenceEdit setSpeed(Document& doc, const std::vector<ClipId>& ids, Rational sp
     return edit;
 }
 
+// ---------------------------------------------------------------- ripple / roll
+
+SequenceEdit rippleTrim(Document& doc, ClipId id, Edge edge, TimePoint time) {
+    const auto& project = doc.project();
+    const auto& seq = project.sequence;
+    const Clip* c = seq.findClip(id);
+    if (!c) return {};
+    if (const Track* t = seq.findTrack(c->track); !t || t->locked) return {};
+
+    // Clips trimmed together: the clip and an aligned linked partner.
+    std::vector<const Clip*> trimmedClips{c};
+    if (isValid(c->link)) {
+        if (const Clip* p = seq.findClip(c->link)) {
+            const Track* pt = seq.findTrack(p->track);
+            const bool aligned = edge == Edge::Start ? p->start == c->start : p->end() == c->end();
+            if (pt && !pt->locked && aligned) trimmedClips.push_back(p);
+        }
+    }
+    auto n = trimmed(project, *c, edge, time);
+    if (!n) return {};
+    // Ripple keeps the clip's start; trimming the head changes sourceIn and length only.
+    Ticks delta = n->duration.ticks - c->duration.ticks;   // change of length (+ grows)
+    const TimePoint pivot = c->end();
+    std::vector<ClipId> fixed;
+    for (const Clip* t : trimmedClips) fixed.push_back(t->id);
+
+    // A shortening may not pull a shifted clip into an unshifted one: on every
+    // unlocked track, firstShifted + delta >= end of the last clip staying put.
+    // (On the trimmed clip's own track both sides move together.)
+    if (delta < 0) {
+        for (const Track& track : seq.tracks) {
+            if (track.locked) continue;
+            Ticks firstShifted = std::numeric_limits<Ticks>::max(), lastFixedEnd = 0;
+            for (const Clip& o : seq.clips) {
+                if (o.track != track.id || contains(fixed, o.id)) continue;
+                if (o.start >= pivot) firstShifted = std::min(firstShifted, o.start.ticks);
+                else lastFixedEnd = std::max(lastFixedEnd, o.end().ticks);
+            }
+            if (firstShifted != std::numeric_limits<Ticks>::max()) delta = std::max(delta, std::min<Ticks>(0, lastFixedEnd - firstShifted));
+        }
+    }
+    if (delta == 0) return {};
+
+    SequenceEdit edit;
+    for (const Clip* t : trimmedClips) {
+        Clip m = *t;
+        if (edge == Edge::Start) {
+            // Head trim by d: content starts later in the source, start stays put.
+            const Duration d{-delta};
+            m.sourceIn = t->sourceTimeAt(t->start + d);
+            m.duration = t->duration - d;
+        } else {
+            m.duration = Duration{t->duration.ticks + delta};
+        }
+        if (m.duration.ticks <= 0) return {};
+        edit.modify(std::move(m));
+    }
+    for (const Clip& o : seq.clips) {
+        if (contains(fixed, o.id) || o.start < pivot) continue;
+        if (const Track* t = seq.findTrack(o.track); !t || t->locked) continue;
+        Clip m = o;
+        m.start = TimePoint{o.start.ticks + delta};
+        edit.modify(std::move(m));
+    }
+    return edit;
+}
+
+std::optional<std::pair<ClipId, ClipId>> cutAt(const Sequence& seq, TrackId track, TimePoint t, Duration tolerance) {
+    const Clip* bestLeft = nullptr;
+    const Clip* bestRight = nullptr;
+    Ticks bestDist = tolerance.ticks + 1;
+    for (const Clip& a : seq.clips) {
+        if (a.track != track) continue;
+        for (const Clip& b : seq.clips) {
+            if (b.track != track || b.id == a.id || b.start != a.end()) continue;
+            const Ticks d = std::llabs(a.end().ticks - t.ticks);
+            if (d < bestDist) { bestDist = d; bestLeft = &a; bestRight = &b; }
+        }
+    }
+    if (!bestLeft) return std::nullopt;
+    return std::make_pair(bestLeft->id, bestRight->id);
+}
+
+SequenceEdit rollEdit(Document& doc, ClipId leftId, ClipId rightId, TimePoint time) {
+    const auto& project = doc.project();
+    const auto& seq = project.sequence;
+    const Clip* l = seq.findClip(leftId);
+    const Clip* r = seq.findClip(rightId);
+    if (!l || !r || l->track != r->track || l->end() != r->start) return {};
+    if (const Track* t = seq.findTrack(l->track); !t || t->locked) return {};
+
+    std::vector<std::pair<const Clip*, const Clip*>> cuts{{l, r}};
+    // Linked partners forming the same cut on their track roll too.
+    if (isValid(l->link) && isValid(r->link)) {
+        const Clip* pl = seq.findClip(l->link);
+        const Clip* pr = seq.findClip(r->link);
+        if (pl && pr && pl->track == pr->track && pl->end() == pr->start && pl->end() == l->end()) {
+            if (const Track* t = seq.findTrack(pl->track); t && !t->locked) cuts.emplace_back(pl, pr);
+        }
+    }
+    const Duration frame = frameDuration(project.settings.frameRate);
+    Ticks lo = std::numeric_limits<Ticks>::min(), hi = std::numeric_limits<Ticks>::max();
+    for (const auto& [a, b] : cuts) {
+        lo = std::max(lo, a->start.ticks + frame.ticks);
+        hi = std::min(hi, b->end().ticks - frame.ticks);
+        // Left clip cannot extend past the end of its media...
+        if (auto md = mediaDuration(project, *a)) hi = std::min(hi, a->start.ticks + a->timelineDurationFor(*md - Duration{a->sourceIn.ticks}).ticks);
+        // ...and the right clip cannot reveal media before its first sample.
+        lo = std::max(lo, b->start.ticks - b->timelineDurationFor(Duration{b->sourceIn.ticks}).ticks);
+    }
+    if (lo > hi) return {};
+    const Ticks cut = std::clamp(time.ticks, lo, hi);
+    if (cut == l->end().ticks) return {};
+    SequenceEdit edit;
+    for (const auto& [a, b] : cuts) {
+        Clip na = *a;
+        na.duration = TimePoint{cut} - a->start;
+        Clip nb = *b;
+        nb.sourceIn = b->sourceTimeAt(TimePoint{cut});
+        nb.duration = b->end() - TimePoint{cut};
+        nb.start = TimePoint{cut};
+        edit.modify(std::move(na));
+        edit.modify(std::move(nb));
+    }
+    return edit;
+}
+
+// ---------------------------------------------------------------- lift / extract
+
+SequenceEdit liftRange(Document& doc, TimeRange range) {
+    SequenceEdit edit;
+    if (range.isEmpty()) return edit;
+    Pieces pieces;
+    for (const Track& t : doc.project().sequence.tracks) overwriteRangeImpl(doc, t.id, range, {}, edit, pieces);
+    relinkPieces(doc.project().sequence, pieces, edit);
+    return edit;
+}
+
+SequenceEdit extractRange(Document& doc, TimeRange range) {
+    SequenceEdit edit = liftRange(doc, range);
+    if (range.isEmpty()) return edit;
+    const auto& seq = doc.project().sequence;
+    for (const Clip& c : effectiveClips(seq, edit)) {
+        if (c.start < range.end()) continue;
+        if (const Track* t = seq.findTrack(c.track); !t || t->locked) continue;
+        Clip m = c;
+        m.start = c.start - range.duration;
+        edit.modify(std::move(m));
+    }
+    return edit;
+}
+
+std::vector<TimePoint> editPoints(const Sequence& seq) {
+    std::vector<TimePoint> pts{TimePoint::zero()};
+    for (const auto& c : seq.clips) { pts.push_back(c.start); pts.push_back(c.end()); }
+    std::sort(pts.begin(), pts.end());
+    pts.erase(std::unique(pts.begin(), pts.end()), pts.end());
+    return pts;
+}
+
+std::optional<TimePoint> previousEditPoint(const Sequence& seq, TimePoint t) {
+    std::optional<TimePoint> best;
+    for (TimePoint p : editPoints(seq)) if (p < t) best = p;
+    return best;
+}
+
+std::optional<TimePoint> nextEditPoint(const Sequence& seq, TimePoint t) {
+    for (TimePoint p : editPoints(seq)) if (p > t) return p;
+    return std::nullopt;
+}
+
 // ---------------------------------------------------------------- helpers
 
 std::vector<Clip> applied(const Sequence& seq, const SequenceEdit& edit) { return effectiveClips(seq, edit); }
