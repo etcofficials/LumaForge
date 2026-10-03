@@ -61,7 +61,7 @@ struct Metrics {
     int rulerHeight = 26;
     int videoTrackHeight = 60;
     int audioTrackHeight = 44;
-    int trackHeaderWidth = 150;
+    int trackHeaderWidth = 164;
     int splitterWidth = 4;
     int radius = 3;
     int spacing = 6;

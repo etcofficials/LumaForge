@@ -150,6 +150,7 @@ private:
     QLabel* m_toolbarFps = nullptr;
     CommandPalette* m_palette = nullptr;
     bool m_viewerFullscreen = false;
+    int m_timelineHeightBeforeExpand = 0;
     bool m_wasMaximized = false;
     QByteArray m_preFullscreenState;
 

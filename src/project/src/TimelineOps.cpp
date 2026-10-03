@@ -628,6 +628,173 @@ std::optional<TimePoint> nextEditPoint(const Sequence& seq, TimePoint t) {
     return std::nullopt;
 }
 
+// ---------------------------------------------------------------- tracks
+
+namespace {
+bool isDefaultName(const std::string& name, TrackKind kind) {
+    if (name.size() < 2 || name[0] != (kind == TrackKind::Video ? 'V' : 'A')) return false;
+    return std::all_of(name.begin() + 1, name.end(), [](char ch) { return ch >= '0' && ch <= '9'; });
+}
+
+// Region [first, last] of display indices holding `kind`.
+std::pair<int, int> kindRegion(const std::vector<Track>& tracks, TrackKind kind) {
+    int first = -1, last = -1;
+    for (int i = 0; i < static_cast<int>(tracks.size()); ++i) {
+        if (tracks[static_cast<std::size_t>(i)].kind != kind) continue;
+        if (first < 0) first = i;
+        last = i;
+    }
+    if (first < 0) {
+        // No track of this kind yet: video goes on top, audio at the bottom.
+        const int at = kind == TrackKind::Video ? 0 : static_cast<int>(tracks.size());
+        return {at, at - 1};
+    }
+    return {first, last};
+}
+
+// Turns `after` (the desired track list) into an edit that renames default-named
+// tracks by position and records the changes relative to `before`.
+void finishTrackEdit(const std::vector<Track>& before, std::vector<Track> after, SequenceEdit& edit) {
+    after = renumbered(std::move(after));
+    std::vector<TrackId> order;
+    for (const Track& t : after) order.push_back(t.id);
+    edit.trackOrder = order;
+    for (const Track& t : after) {
+        const bool existed = std::any_of(before.begin(), before.end(), [&](const Track& b) { return b.id == t.id; });
+        if (!existed) continue;
+        const Track* b = nullptr;
+        for (const Track& x : before) if (x.id == t.id) b = &x;
+        if (b && !(*b == t)) edit.tracks.push_back(t);
+    }
+}
+}  // namespace
+
+std::vector<Track> renumbered(std::vector<Track> tracks) {
+    // Video tracks count up from the bottom (V1 just above the audio), audio from the top.
+    int videoCount = 0;
+    for (const Track& t : tracks) if (t.kind == TrackKind::Video) ++videoCount;
+    int v = videoCount, a = 1;
+    for (Track& t : tracks) {
+        if (t.kind == TrackKind::Video) {
+            if (isDefaultName(t.name, t.kind)) t.name = "V" + std::to_string(v);
+            --v;
+        } else {
+            if (isDefaultName(t.name, t.kind)) t.name = "A" + std::to_string(a);
+            ++a;
+        }
+    }
+    return tracks;
+}
+
+SequenceEdit addTrack(Document& doc, TrackKind kind, int index) {
+    const auto& tracks = doc.project().sequence.tracks;
+    auto [first, last] = kindRegion(tracks, kind);
+    int at = index;
+    if (at < 0) at = kind == TrackKind::Video ? first : last + 1;
+    at = std::clamp(at, first, last + 1);
+    Track t;
+    t.id = doc.allocateTrackId();
+    t.kind = kind;
+    t.name = kind == TrackKind::Video ? "V0" : "A0";   // renumbered below
+    SequenceEdit edit;
+    edit.tracksAdded.emplace_back(static_cast<std::size_t>(at), t);
+    std::vector<Track> after = tracks;
+    after.insert(after.begin() + at, t);
+    finishTrackEdit(tracks, after, edit);
+    // The added track gets its final name inside tracksAdded too.
+    for (const Track& r : renumbered(after)) if (r.id == t.id) edit.tracksAdded.front().second.name = r.name;
+    edit.tracks.erase(std::remove_if(edit.tracks.begin(), edit.tracks.end(), [&](const Track& x) { return x.id == t.id; }), edit.tracks.end());
+    return edit;
+}
+
+SequenceEdit removeTrack(Document& doc, TrackId id) {
+    const auto& seq = doc.project().sequence;
+    const Track* track = seq.findTrack(id);
+    if (!track) return {};
+    int sameKind = 0;
+    for (const Track& t : seq.tracks) if (t.kind == track->kind) ++sameKind;
+    if (sameKind <= 1) return {};
+    SequenceEdit edit;
+    for (const Clip& c : seq.clips) {
+        if (c.track != id) continue;
+        edit.remove(c.id);
+        // Partners on other tracks lose their link.
+        if (const Clip* p = seq.findClip(c.link); p && p->track != id) {
+            Clip n = *p;
+            n.link = ClipId::Invalid;
+            edit.modify(std::move(n));
+        }
+    }
+    edit.tracksRemoved.push_back(id);
+    std::vector<Track> after;
+    for (const Track& t : seq.tracks) if (t.id != id) after.push_back(t);
+    finishTrackEdit(seq.tracks, after, edit);
+    return edit;
+}
+
+SequenceEdit duplicateTrack(Document& doc, TrackId id) {
+    const auto& seq = doc.project().sequence;
+    const Track* track = seq.findTrack(id);
+    if (!track) return {};
+    const int index = seq.trackIndex(id);
+    Track copy = *track;
+    copy.id = doc.allocateTrackId();
+    copy.locked = false;
+    if (!isDefaultName(copy.name, copy.kind)) copy.name += " copy";
+    SequenceEdit edit;
+    edit.tracksAdded.emplace_back(static_cast<std::size_t>(index), copy);
+    std::vector<Track> after = seq.tracks;
+    after.insert(after.begin() + index, copy);
+    finishTrackEdit(seq.tracks, after, edit);
+    for (const Track& r : renumbered(after)) if (r.id == copy.id) edit.tracksAdded.front().second.name = r.name;
+    edit.tracks.erase(std::remove_if(edit.tracks.begin(), edit.tracks.end(), [&](const Track& x) { return x.id == copy.id; }), edit.tracks.end());
+    std::vector<Clip> source;
+    for (const Clip& c : seq.clips) if (c.track == id) source.push_back(c);
+    for (Clip& c : cloneClips(doc, source, Duration::zero())) {
+        c.track = copy.id;
+        edit.add(std::move(c));
+    }
+    return edit;
+}
+
+SequenceEdit moveTrack(Document& doc, TrackId id, int delta) {
+    const auto& tracks = doc.project().sequence.tracks;
+    const int index = doc.project().sequence.trackIndex(id);
+    if (index < 0 || delta == 0) return {};
+    const auto [first, last] = kindRegion(tracks, tracks[static_cast<std::size_t>(index)].kind);
+    const int target = std::clamp(index + delta, first, last);
+    if (target == index) return {};
+    std::vector<Track> after = tracks;
+    Track t = after[static_cast<std::size_t>(index)];
+    after.erase(after.begin() + index);
+    after.insert(after.begin() + target, t);
+    SequenceEdit edit;
+    finishTrackEdit(tracks, after, edit);
+    return edit;
+}
+
+SequenceEdit renameTrack(Document& doc, TrackId id, const std::string& name) {
+    const Track* t = doc.project().sequence.findTrack(id);
+    if (!t || name.empty() || t->name == name) return {};
+    SequenceEdit edit;
+    Track n = *t;
+    n.name = name;
+    edit.tracks.push_back(n);
+    return edit;
+}
+
+SequenceEdit setTrackHeight(Document& doc, TrackId id, int height) {
+    const Track* t = doc.project().sequence.findTrack(id);
+    if (!t) return {};
+    height = std::clamp(height, 0, 400);
+    if (t->height == height) return {};
+    SequenceEdit edit;
+    Track n = *t;
+    n.height = height;
+    edit.tracks.push_back(n);
+    return edit;
+}
+
 // ---------------------------------------------------------------- helpers
 
 std::vector<Clip> applied(const Sequence& seq, const SequenceEdit& edit) { return effectiveClips(seq, edit); }

@@ -333,3 +333,101 @@ TEST_CASE("In/Out marks are undoable edits that never merge") {
     doc.undoStack().redo();
     CHECK(seq.markOut == sec(5));
 }
+
+// ---------------------------------------------------------------- tracks
+
+namespace {
+std::vector<std::string> names(const Sequence& s) {
+    std::vector<std::string> out;
+    for (const auto& t : s.tracks) out.push_back(t.name);
+    return out;
+}
+}  // namespace
+
+TEST_CASE("tracks: add keeps video above audio and renumbers default names; undo restores") {
+    Document doc;
+    const auto& seq = doc.project().sequence;
+    CHECK((names(seq) == std::vector<std::string>{"V2", "V1", "A1", "A2"}));
+    apply(doc, "Add", ops::addTrack(doc, TrackKind::Video));
+    CHECK((names(seq) == std::vector<std::string>{"V3", "V2", "V1", "A1", "A2"}));
+    apply(doc, "Add", ops::addTrack(doc, TrackKind::Audio));
+    CHECK((names(seq) == std::vector<std::string>{"V3", "V2", "V1", "A1", "A2", "A3"}));
+    // Inserting a video track "below V1" lands between V1 and the audio tracks and V1 becomes V2... renumbered by position.
+    apply(doc, "Add", ops::addTrack(doc, TrackKind::Video, 3));
+    CHECK((names(seq) == std::vector<std::string>{"V4", "V3", "V2", "V1", "A1", "A2", "A3"}));
+    // An index inside the audio region is clamped to the video region.
+    apply(doc, "Add", ops::addTrack(doc, TrackKind::Video, 6));
+    CHECK(seq.tracks[4].kind == TrackKind::Video && seq.tracks[5].kind == TrackKind::Audio);
+    for (int i = 0; i < 4; ++i) doc.undoStack().undo();
+    CHECK((names(seq) == std::vector<std::string>{"V2", "V1", "A1", "A2"}));
+    doc.undoStack().redo();
+    CHECK(seq.tracks.size() == 5);
+}
+
+TEST_CASE("tracks: delete removes its clips and unlinks partners; last track of a kind stays") {
+    Document doc;
+    const MediaId m = addVideo(doc, "a.mp4", 4);
+    const ClipId v = place(doc, m, 0);
+    const auto& seq = doc.project().sequence;
+    const ClipId a = seq.findClip(v)->link;
+    const TrackId v1 = seq.findClip(v)->track;
+    apply(doc, "Delete Track", ops::removeTrack(doc, v1));
+    CHECK(seq.findClip(v) == nullptr);
+    CHECK(seq.findClip(a) != nullptr && !isValid(seq.findClip(a)->link));
+    CHECK((names(seq) == std::vector<std::string>{"V1", "A1", "A2"}));   // old V2 is now V1
+    CHECK(ops::removeTrack(doc, seq.tracks[0].id).empty());              // the only video track
+    doc.undoStack().undo();
+    CHECK(seq.findClip(v) != nullptr && seq.findClip(a)->link == v);
+    CHECK((names(seq) == std::vector<std::string>{"V2", "V1", "A1", "A2"}));
+}
+
+TEST_CASE("tracks: duplicate copies clips with new ids; move stays within the kind; rename and height") {
+    Document doc;
+    const MediaId m = addVideo(doc, "a.mp4", 4, false);
+    const ClipId v = place(doc, m, 1);
+    const auto& seq = doc.project().sequence;
+    const TrackId v1 = seq.findClip(v)->track;
+    apply(doc, "Duplicate", ops::duplicateTrack(doc, v1));
+    CHECK(seq.tracks.size() == 5);
+    CHECK(seq.clips.size() == 2);
+    const Clip* copy = nullptr;
+    for (const auto& c : seq.clips) if (c.id != v) copy = &c;
+    CHECK(copy && copy->track != v1 && copy->start == sec(1));
+    apply(doc, "Rename", ops::renameTrack(doc, v1, "B-Roll"));
+    CHECK(seq.findTrack(v1)->name == "B-Roll");
+    const int before = seq.trackIndex(v1);
+    apply(doc, "Move", ops::moveTrack(doc, v1, -1));
+    CHECK(seq.trackIndex(v1) == before - 1);
+    CHECK(seq.findTrack(v1)->name == "B-Roll");                       // custom names survive renumbering
+    CHECK(ops::moveTrack(doc, seq.tracks[seq.tracks.size() - 3].id, 1).empty() || seq.tracks[seq.tracks.size() - 2].kind == TrackKind::Audio);
+    apply(doc, "Height", ops::setTrackHeight(doc, v1, 120));
+    CHECK(seq.findTrack(v1)->height == 120);
+    doc.undoStack().undo();
+    CHECK(seq.findTrack(v1)->height == 0);
+    const std::string json = serializer::toJson(doc.project(), "");
+    doc.undoStack().redo();
+    CHECK(serializer::toJson(doc.project(), "").find("\"height\": 120") != std::string::npos);
+    CHECK(json.find("\"height\": 120") == std::string::npos);
+}
+
+TEST_CASE("video solo shows only soloed video tracks") {
+    Document doc;
+    const MediaId m = addVideo(doc, "a.mp4", 4, false);
+    const ClipId low = place(doc, m, 0);
+    auto& seq = doc.project().sequence;
+    Clip upper = *seq.findClip(low);
+    upper.id = doc.allocateClipId();
+    upper.track = seq.tracks[0].id;   // V2
+    apply(doc, "Add", ops::insertClips(doc, {upper}));
+    {
+        playback::SequenceProgram p(doc.project());
+        std::vector<playback::VideoLayerRequest> layers;
+        p.videoLayersAt(sec(1), layers);
+        CHECK(layers.size() == 2);
+    }
+    seq.findTrack(seq.findClip(low)->track)->solo = true;
+    playback::SequenceProgram p(doc.project());
+    std::vector<playback::VideoLayerRequest> layers;
+    p.videoLayersAt(sec(1), layers);
+    CHECK(layers.size() == 1 && layers[0].layerKey == raw(low));
+}

@@ -56,6 +56,13 @@ public:
     // True when every selected clip is enabled (drives the Enable action's check state).
     [[nodiscard]] bool selectionEnabled() const;
 
+    // Vertical scrolling of the track lanes (ruler and headers' width stay fixed).
+    [[nodiscard]] int scrollY() const noexcept { return m_scrollY; }
+    [[nodiscard]] int contentHeight() const noexcept;      // all lanes
+    [[nodiscard]] int lanesViewportHeight() const noexcept;
+    // The track whose header was clicked last (target of track commands).
+    [[nodiscard]] project::TrackId selectedTrack() const noexcept { return m_selectedTrack; }
+
     // Visible range in ticks; used by the external scrollbar.
     [[nodiscard]] Ticks scrollOffset() const noexcept { return m_scrollTicks; }
     [[nodiscard]] Ticks visibleTicks() const noexcept;
@@ -69,6 +76,9 @@ public slots:
     void setFrameRate(lf::Rational fps);
     void setSnappingEnabled(bool enabled);
     void setScrollOffset(lf::Ticks ticks);
+    void setScrollY(int y);
+    void setSelectedTrack(lf::project::TrackId id);
+    void renameTrackInteractive(lf::project::TrackId id);
     void zoomIn();
     void zoomOut();
     void zoomToFit();
@@ -114,6 +124,8 @@ signals:
     void toolChanged(lf::ui::EditTool tool);
     void clipDoubleClicked(lf::project::ClipId id);
     void contextMenuRequested(const QPoint& globalPos, lf::project::ClipId clipUnderCursor);
+    void trackContextMenuRequested(const QPoint& globalPos, lf::project::TrackId track);
+    void selectedTrackChanged(lf::project::TrackId track);
     // Files from Explorer dropped on the timeline; the owner imports them and calls addMediaAt().
     void externalFilesDropped(const QStringList& paths, lf::TimePoint at);
 
@@ -150,7 +162,7 @@ private:
         bool labelFrames;
     };
     enum class Gesture { None, Scrub, PendingClip, Move, TrimStart, TrimEnd, PendingMarquee, Marquee,
-                         RippleStart, RippleEnd, Roll, Pan, PendingZoom, ZoomRange };
+                         RippleStart, RippleEnd, Roll, Pan, PendingZoom, ZoomRange, ResizeTrack };
     struct Hit {
         project::ClipId clip = project::ClipId::Invalid;
         bool nearStart = false;
@@ -173,12 +185,19 @@ private:
     [[nodiscard]] Hit hitTest(const QPoint& pos) const;
     [[nodiscard]] Duration snapTolerance() const noexcept;
     enum class TrackFlag { Mute, Solo, Lock };   // Mute on a video track = hidden
+public:
+    void toggleTrackFlagPublic(project::TrackId id, int flag) { toggleTrackFlag(id, static_cast<TrackFlag>(flag)); }
+private:
     struct LaneButton { QRect rect; TrackFlag flag; };
     [[nodiscard]] std::vector<LaneButton> laneButtons(const Lane& lane) const;
 
     // Model sync
     void onDocumentChange(const project::Change& change);
     void rebuildLanes();
+    void clampScrollY();
+    [[nodiscard]] int defaultHeight(project::TrackKind kind) const noexcept;
+    // Header zone where dragging resizes the lane above the pointer's lane border.
+    [[nodiscard]] const Lane* resizeHandleAt(const QPoint& pos) const;
     void refreshDuration();
     void pruneSelection();
     void commit(const QString& text, project::SequenceEdit edit);
@@ -230,6 +249,12 @@ private:
     Ticks m_scrollTicks = 0;
     bool m_snapping = true;
     bool m_pendingFit = false;
+    int m_scrollY = 0;
+    project::TrackId m_selectedTrack = project::TrackId::Invalid;
+    project::TrackId m_resizeTrack = project::TrackId::Invalid;
+    int m_resizeStartY = 0;
+    int m_resizeStartHeight = 0;
+    int m_resizePreview = -1;
     int m_hoverX = -1;
     std::vector<Lane> m_lanes;
     std::vector<project::ClipId> m_selection;

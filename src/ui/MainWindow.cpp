@@ -212,6 +212,8 @@ void MainWindow::buildMenus() {
     auto* clip = menuBar()->addMenu(tr("&Clip"));
     add(clip, {ActionId::EditCut, ActionId::ClipSplit, ActionId::ClipTrimStartToPlayhead, ActionId::ClipTrimEndToPlayhead, ActionId::ClipRippleDelete});
     clip->addSeparator();
+    add(clip, {ActionId::ClipSpeed, ActionId::ClipProperties, ActionId::ClipRevealInMedia});
+    clip->addSeparator();
     auto* nudge = clip->addMenu(tr("&Nudge"));
     add(nudge, {ActionId::ClipNudgeLeft, ActionId::ClipNudgeRight, ActionId::ClipNudgeLeftLarge, ActionId::ClipNudgeRightLarge});
     add(clip, {ActionId::ClipMoveToPlayhead});
@@ -221,12 +223,20 @@ void MainWindow::buildMenus() {
     add(clip, {ActionId::ClipEnable});
 
     auto* timeline = menuBar()->addMenu(tr("&Timeline"));
+    add(timeline, {ActionId::TimelineAddVideoTrack, ActionId::TimelineAddAudioTrack});
+    auto* track = timeline->addMenu(tr("T&rack"));
+    add(track, {ActionId::TrackRename, ActionId::TrackDuplicate, ActionId::TrackDelete});
+    track->addSeparator();
+    add(track, {ActionId::TrackAddAbove, ActionId::TrackAddBelow, ActionId::TrackMoveUp, ActionId::TrackMoveDown});
+    track->addSeparator();
+    add(track, {ActionId::TrackLock, ActionId::TrackMute, ActionId::TrackSolo});
+    timeline->addSeparator();
     auto* tools = timeline->addMenu(tr("&Tools"));
     add(tools, {ActionId::ToolSelect, ActionId::ToolBlade, ActionId::ToolTrim, ActionId::ToolHand, ActionId::ToolZoom, ActionId::ToolText});
     timeline->addSeparator();
     add(timeline, {ActionId::TimelineSnap});
     timeline->addSeparator();
-    add(timeline, {ActionId::TimelineZoomIn, ActionId::TimelineZoomOut, ActionId::TimelineZoomFit});
+    add(timeline, {ActionId::TimelineZoomIn, ActionId::TimelineZoomOut, ActionId::TimelineZoomFit, ActionId::TimelineExpand});
 
     auto* audio = menuBar()->addMenu(tr("&Audio"));
     add(audio, {ActionId::AudioMuteClip});
@@ -575,6 +585,35 @@ void MainWindow::connectActions() {
             m_inspectorPanel->revealSection(k);
         });
     }
+
+    m_actions->connect(ActionId::ClipSpeed, this, [this] {
+        if (auto* dock = m_workspaces->dock(DockId::Inspector)) { dock->show(); dock->raise(); }
+        m_inspectorPanel->revealSection(QStringLiteral("speed"));
+    });
+    m_actions->connect(ActionId::ClipProperties, this, [this] {
+        if (auto* dock = m_workspaces->dock(DockId::Inspector)) { dock->show(); dock->raise(); }
+        m_inspectorPanel->revealSection(QStringLiteral("clip"));
+    });
+    m_actions->connect(ActionId::ClipRevealInMedia, this, [this] {
+        const auto& sel = m_timelinePanel->view()->selection();
+        if (sel.empty()) return;
+        const auto* c = m_document->project().sequence.findClip(sel.front());
+        if (!c || !project::isValid(c->media)) return;
+        if (auto* dock = m_workspaces->dock(DockId::Browser)) { dock->show(); dock->raise(); }
+        m_browser->showPage(QStringLiteral("media"));
+        m_mediaPanel->revealMedia(c->media);
+    });
+    m_actions->connect(ActionId::TimelineExpand, this, [this] {
+        auto* dock = m_workspaces->dock(DockId::Timeline);
+        if (!dock) return;
+        if (m_actions->action(ActionId::TimelineExpand)->isChecked()) {
+            m_timelineHeightBeforeExpand = dock->height();
+            dock->show();
+            m_editor->resizeDocks({dock}, {std::max(200, m_editor->height() - 160)}, Qt::Vertical);
+        } else {
+            m_editor->resizeDocks({dock}, {m_timelineHeightBeforeExpand > 0 ? m_timelineHeightBeforeExpand : m_editor->height() * 2 / 5}, Qt::Vertical);
+        }
+    });
 
     // Import folder, help, palette
     m_actions->connect(ActionId::MediaImportFolder, this, [this] { importFolderWithDialog(); });

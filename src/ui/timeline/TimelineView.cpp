@@ -14,6 +14,7 @@
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QHelpEvent>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QMimeData>
 #include <QMouseEvent>
@@ -85,6 +86,8 @@ void TimelineView::onDocumentChange(const Change& change) {
             [[fallthrough]];
         case Change::Kind::TracksChanged:
             rebuildLanes();
+            clampScrollY();
+            if (!m_doc.project().sequence.findTrack(m_selectedTrack)) setSelectedTrack(TrackId::Invalid);
             pruneSelection();
             refreshDuration();
             updateGeometry();
@@ -109,17 +112,23 @@ void TimelineView::onDocumentChange(const Change& change) {
     }
 }
 
-void TimelineView::rebuildLanes() {
+int TimelineView::defaultHeight(TrackKind kind) const noexcept {
     const auto& m = Theme::metrics();
+    return kind == TrackKind::Video ? m.videoTrackHeight : m.audioTrackHeight;
+}
+
+void TimelineView::rebuildLanes() {
     m_lanes.clear();
-    int y = rulerHeight();
+    // Lane y is in widget coordinates: content position minus the vertical scroll.
+    int y = rulerHeight() - m_scrollY;
     for (const auto& t : m_doc.project().sequence.tracks) {
         Lane l;
         l.id = t.id;
         l.kind = t.kind;
         l.name = QString::fromStdString(t.name);
         l.y = y;
-        l.height = t.kind == TrackKind::Video ? m.videoTrackHeight : m.audioTrackHeight;
+        l.height = t.height > 0 ? t.height : defaultHeight(t.kind);
+        if (t.id == m_resizeTrack && m_resizePreview > 0) l.height = m_resizePreview;
         l.muted = t.muted;
         l.locked = t.locked;
         l.solo = t.solo;
@@ -204,17 +213,62 @@ Ticks TimelineView::scrollRange() const noexcept {
     return std::max<Ticks>(0, total - visibleTicks());
 }
 
-QSize TimelineView::sizeHint() const {
-    int h = rulerHeight();
+int TimelineView::contentHeight() const noexcept {
+    int h = 0;
     for (const auto& l : m_lanes) h += l.height;
-    return {800, h + 24};
+    return h;
 }
 
-QSize TimelineView::minimumSizeHint() const {
-    int h = rulerHeight();
-    for (const auto& l : m_lanes) h += l.height;
-    return {400, std::min(h, 160)};
+int TimelineView::lanesViewportHeight() const noexcept { return std::max(0, height() - rulerHeight()); }
+
+void TimelineView::clampScrollY() {
+    const int maxY = std::max(0, contentHeight() + 24 - lanesViewportHeight());
+    const int y = std::clamp(m_scrollY, 0, maxY);
+    if (y != m_scrollY) {
+        m_scrollY = y;
+        rebuildLanes();
+        update();
+    }
 }
+
+void TimelineView::setScrollY(int y) {
+    const int maxY = std::max(0, contentHeight() + 24 - lanesViewportHeight());
+    y = std::clamp(y, 0, maxY);
+    if (y == m_scrollY) return;
+    m_scrollY = y;
+    rebuildLanes();
+    update();
+    emit viewChanged();
+}
+
+void TimelineView::setSelectedTrack(TrackId id) {
+    if (id == m_selectedTrack) return;
+    m_selectedTrack = id;
+    update(QRect(0, rulerHeight(), headerWidth(), height()));
+    emit selectedTrackChanged(id);
+}
+
+void TimelineView::renameTrackInteractive(TrackId id) {
+    const Track* t = m_doc.project().sequence.findTrack(id);
+    if (!t) return;
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Rename Track"), tr("Track name:"), QLineEdit::Normal, QString::fromStdString(t->name), &ok).trimmed();
+    if (!ok || name.isEmpty()) return;
+    commit(tr("Rename Track"), ops::renameTrack(m_doc, id, name.toStdString()));
+}
+
+const TimelineView::Lane* TimelineView::resizeHandleAt(const QPoint& pos) const {
+    if (pos.x() >= headerWidth() || pos.y() < rulerHeight()) return nullptr;
+    for (const auto& l : m_lanes) {
+        const int bottom = l.y + l.height;
+        if (pos.y() >= bottom - 3 && pos.y() <= bottom + 2) return &l;
+    }
+    return nullptr;
+}
+
+QSize TimelineView::sizeHint() const { return {800, rulerHeight() + contentHeight() + 24}; }
+
+QSize TimelineView::minimumSizeHint() const { return {400, rulerHeight() + 60}; }
 
 QRect TimelineView::playheadRect(TimePoint t) const {
     const int x = static_cast<int>(std::floor(xFromTicks(t.ticks)));
@@ -269,8 +323,7 @@ Duration TimelineView::snapTolerance() const noexcept { return Duration{ticksPer
 
 std::vector<TimelineView::LaneButton> TimelineView::laneButtons(const Lane& lane) const {
     // Right-aligned, compact: video = [eye][L], audio = [M][S][L].
-    std::vector<TrackFlag> flags = lane.kind == TrackKind::Video ? std::vector<TrackFlag>{TrackFlag::Mute, TrackFlag::Lock}
-                                                                 : std::vector<TrackFlag>{TrackFlag::Mute, TrackFlag::Solo, TrackFlag::Lock};
+    const std::vector<TrackFlag> flags{TrackFlag::Mute, TrackFlag::Solo, TrackFlag::Lock};
     std::vector<LaneButton> out;
     int x = headerWidth() - 8;
     for (auto it = flags.rbegin(); it != flags.rend(); ++it) {
@@ -683,7 +736,7 @@ void TimelineView::autoScrollTowards(int x) {
 
 void TimelineView::updateCursor(const QPoint& pos) {
     if (m_gesture != Gesture::None) return;
-    if (pos.x() < headerWidth()) { setCursor(Qt::ArrowCursor); return; }
+    if (pos.x() < headerWidth()) { setCursor(resizeHandleAt(pos) ? Qt::SizeVerCursor : Qt::ArrowCursor); return; }
     const Hit hit = hitTest(pos);
     if (m_tool == EditTool::Blade) {
         const Lane* lane = laneAt(pos.y());
@@ -753,9 +806,27 @@ void TimelineView::updateMarquee(const QPoint& pos) {
 void TimelineView::mousePressEvent(QMouseEvent* e) {
     setFocus(Qt::MouseFocusReason);
     const QPoint pos = e->position().toPoint();
-    if (e->button() == Qt::LeftButton && pos.x() < headerWidth()) {
-        if (const Lane* lane = laneAt(pos.y())) {
-            for (const auto& b : laneButtons(*lane)) if (b.rect.contains(pos)) { toggleTrackFlag(lane->id, b.flag); break; }
+    if (pos.x() < headerWidth() && pos.y() >= rulerHeight()) {
+        if (e->button() == Qt::LeftButton) {
+            if (const Lane* handle = resizeHandleAt(pos)) {
+                m_gesture = Gesture::ResizeTrack;
+                m_resizeTrack = handle->id;
+                m_resizeStartY = pos.y();
+                m_resizeStartHeight = handle->height;
+                m_resizePreview = handle->height;
+                e->accept();
+                return;
+            }
+            if (const Lane* lane = laneAt(pos.y())) {
+                bool onButton = false;
+                for (const auto& b : laneButtons(*lane)) if (b.rect.contains(pos)) { toggleTrackFlag(lane->id, b.flag); onButton = true; break; }
+                if (!onButton) setSelectedTrack(lane->id);
+            }
+        } else if (e->button() == Qt::RightButton) {
+            if (const Lane* lane = laneAt(pos.y())) {
+                setSelectedTrack(lane->id);
+                emit trackContextMenuRequested(e->globalPosition().toPoint(), lane->id);
+            }
         }
         e->accept();
         return;
@@ -860,6 +931,13 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e) {
             return;
         case Gesture::Pan:
             setScrollOffset(m_pressScroll - static_cast<Ticks>((pos.x() - m_pressPos.x()) / m_pixelsPerSecond * kFlicksPerSecond));
+            setScrollY(m_scrollY - (pos.y() - m_pressPos.y()));
+            m_pressPos.setY(pos.y());
+            return;
+        case Gesture::ResizeTrack:
+            m_resizePreview = std::clamp(m_resizeStartHeight + pos.y() - m_resizeStartY, 28, 400);
+            rebuildLanes();
+            update();
             return;
         case Gesture::PendingZoom:
             if ((pos - m_pressPos).manhattanLength() < kDragThresholdPx) return;
@@ -967,6 +1045,20 @@ void TimelineView::mouseReleaseEvent(QMouseEvent* e) {
             return;
         case Gesture::Pan:
             break;
+        case Gesture::ResizeTrack: {
+            const TrackId id = m_resizeTrack;
+            const int h = m_resizePreview;
+            m_resizeTrack = TrackId::Invalid;
+            m_resizePreview = -1;
+            const Track* t = m_doc.project().sequence.findTrack(id);
+            // Back to "default" when dragged to the default height for its kind.
+            if (t) commit(tr("Resize Track"), ops::setTrackHeight(m_doc, id, h == defaultHeight(t->kind) ? 0 : h));
+            rebuildLanes();
+            clampScrollY();
+            update();
+            emit viewChanged();
+            break;
+        }
         case Gesture::PendingZoom: {
             const int x = m_pressPos.x();
             if (m_pressMods & Qt::AltModifier) setZoom(m_pixelsPerSecond / 2.0, x);
@@ -1029,6 +1121,14 @@ void TimelineView::finishGesture(bool commitEdit) {
 }
 
 void TimelineView::mouseDoubleClickEvent(QMouseEvent* e) {
+    const QPoint p = e->position().toPoint();
+    if (e->button() == Qt::LeftButton && p.x() < headerWidth() && p.y() >= rulerHeight() && !resizeHandleAt(p)) {
+        if (const Lane* lane = laneAt(p.y())) {
+            bool onButton = false;
+            for (const auto& b : laneButtons(*lane)) onButton = onButton || b.rect.contains(p);
+            if (!onButton) { renameTrackInteractive(lane->id); return; }
+        }
+    }
     // A fast second press behaves like any other press (select / blade / seek)...
     mousePressEvent(e);
     // ...and a double-click on a clip additionally announces it.
@@ -1050,13 +1150,16 @@ bool TimelineView::event(QEvent* e) {
         auto* he = static_cast<QHelpEvent*>(e);
         const QPoint pos = he->pos();
         QString text;
-        if (pos.x() < headerWidth()) {
+        if (pos.x() < headerWidth() && resizeHandleAt(pos)) {
+            text = tr("Drag to change the track height");
+        } else if (pos.x() < headerWidth()) {
             if (const Lane* lane = laneAt(pos.y())) {
+                text = tr("%1 — click to target, double-click to rename, right-click for track commands").arg(lane->name);
                 for (const auto& b : laneButtons(*lane)) {
                     if (!b.rect.contains(pos)) continue;
                     switch (b.flag) {
                         case TrackFlag::Mute: text = lane->kind == TrackKind::Video ? tr("Toggle track visibility") : tr("Mute track"); break;
-                        case TrackFlag::Solo: text = tr("Solo track (only soloed tracks play)"); break;
+                        case TrackFlag::Solo: text = lane->kind == TrackKind::Video ? tr("Solo track (only soloed video tracks are shown)") : tr("Solo track (only soloed tracks play)"); break;
                         case TrackFlag::Lock: text = tr("Lock track (no edits)"); break;
                     }
                 }
@@ -1087,6 +1190,8 @@ void TimelineView::wheelEvent(QWheelEvent* e) {
     const int steps = (deg.y() != 0 ? deg.y() : deg.x()) / 120;
     if (e->modifiers() & Qt::ControlModifier) {
         setZoom(m_pixelsPerSecond * std::pow(1.25, steps), static_cast<int>(e->position().x()));
+    } else if ((e->modifiers() & Qt::ShiftModifier) || e->position().x() < headerWidth()) {
+        setScrollY(m_scrollY - steps * 40);
     } else {
         const Ticks delta = static_cast<Ticks>(visibleTicks() / 10) * -steps;
         setScrollOffset(m_scrollTicks + delta);
@@ -1096,6 +1201,7 @@ void TimelineView::wheelEvent(QWheelEvent* e) {
 
 void TimelineView::resizeEvent(QResizeEvent* e) {
     QWidget::resizeEvent(e);
+    clampScrollY();
     if (m_pendingFit && width() - headerWidth() >= 120) zoomToFit();
     clampScroll();
     emit viewChanged();
@@ -1353,15 +1459,19 @@ void TimelineView::paintHeaders(QPainter& p) {
     QFont small = font();
     small.setPointSizeF(font().pointSizeF() - 1.5);
     small.setWeight(QFont::DemiBold);
+    p.save();
+    p.setClipRect(QRect(0, rulerHeight(), w, height() - rulerHeight()));
     for (const auto& lane : m_lanes) {
+        if (lane.y + lane.height < rulerHeight() || lane.y > height()) continue;
         const QRect r(0, lane.y, w, lane.height);
-        p.fillRect(r, pal.trackHeader);
+        p.fillRect(r, lane.id == m_selectedTrack ? pal.bgHover : pal.trackHeader);
         p.setPen(pal.border);
         p.drawLine(r.left(), r.bottom(), r.right(), r.bottom());
         p.fillRect(QRect(0, lane.y, 3, lane.height), lane.kind == TrackKind::Video ? pal.clipVideo : pal.clipAudio);
         p.setPen(lane.muted ? pal.textMuted : pal.textPrimary);
         p.setFont(bold);
-        p.drawText(QRect(12, lane.y, w - 70, lane.height), Qt::AlignLeft | Qt::AlignVCenter, lane.name);
+        p.drawText(QRect(12, lane.y, w - 96, lane.height), Qt::AlignLeft | Qt::AlignVCenter,
+                   p.fontMetrics().elidedText(lane.name, Qt::ElideRight, w - 96));
 
         // Toggle buttons: video [eye][L], audio [M][S][L]
         auto button = [&](const QRect& br, const QString& letter, bool on, const QColor& onColor, bool glyphEye = false) {
@@ -1401,6 +1511,7 @@ void TimelineView::paintHeaders(QPainter& p) {
             }
         }
     }
+    p.restore();
     const int bottom = m_lanes.empty() ? rulerHeight() : m_lanes.back().y + m_lanes.back().height;
     p.fillRect(QRect(0, bottom, w, height() - bottom), pal.timelineBg);
     p.setPen(pal.borderStrong);
@@ -1456,7 +1567,7 @@ void TimelineView::paintTracks(QPainter& p, const QRect& area, const TickSpec& t
     if (m_doc.project().sequence.clips.empty() && m_dropGhosts.empty() && !m_lanes.empty()) {
         p.setPen(pal.textMuted);
         p.drawText(QRect(area.left(), area.top(), area.width(), lanesBottom - area.top()), Qt::AlignCenter,
-                   tr("Drag media here to add it to the timeline"));
+                   tr("Drag media here to begin editing"));
     }
     p.restore();
 }

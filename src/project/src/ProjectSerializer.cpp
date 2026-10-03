@@ -220,7 +220,7 @@ std::string toJson(const Project& project, const std::string& projectDir) {
 
     json tracks = json::array();
     for (const auto& t : project.sequence.tracks) {
-        tracks.push_back({{"id", raw(t.id)}, {"kind", trackKindKey(t.kind)}, {"name", t.name}, {"muted", t.muted}, {"locked", t.locked}, {"solo", t.solo}});
+        tracks.push_back({{"id", raw(t.id)}, {"kind", trackKindKey(t.kind)}, {"name", t.name}, {"muted", t.muted}, {"locked", t.locked}, {"solo", t.solo}, {"height", t.height}});
     }
     json clips = json::array();
     for (const auto& c : project.sequence.clips) {
@@ -289,6 +289,8 @@ Result<LoadResult> fromJson(const std::string& text, const std::string& projectD
             for (const auto& j : *it) {
                 Track t;
                 getId(j, "id", t.id); get(j, "name", t.name); get(j, "muted", t.muted); get(j, "locked", t.locked); get(j, "solo", t.solo);
+                get(j, "height", t.height);
+                t.height = std::clamp(t.height, 0, 400);
                 std::string kind = "video";
                 get(j, "kind", kind);
                 t.kind = kind == "audio" ? TrackKind::Audio : TrackKind::Video;

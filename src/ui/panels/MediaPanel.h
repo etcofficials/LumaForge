@@ -31,6 +31,8 @@ public:
     [[nodiscard]] QList<project::MediaId> selectedMedia() const;
     // Cached thumbnail (null until generated); requests generation on a miss.
     [[nodiscard]] QImage thumbnail(project::MediaId id) const;
+    // Selects and scrolls to the item (clears any search that would hide it).
+    void revealMedia(project::MediaId id);
 
 signals:
     void thumbnailsChanged();

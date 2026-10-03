@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lumaforge/project/Document.h"
+#include "lumaforge/project/TimelineCommands.h"
 
 #include <QWidget>
 
@@ -33,6 +34,9 @@ private:
     void updateActionState();
     void updateDurationLabel();
     void showContextMenu(const QPoint& globalPos, project::ClipId clip);
+    void showTrackMenu(const QPoint& globalPos);
+    void updateTrackActions();
+    void commitTrackEdit(const QString& text, project::SequenceEdit edit);
 
     project::Document& m_doc;
     ActionRegistry& m_actions;
@@ -40,6 +44,7 @@ private:
     QLabel* m_durationLabel;
     TimelineView* m_view;
     QScrollBar* m_scroll;
+    QScrollBar* m_vscroll;
     WaveformService* m_waveforms;
     bool m_syncing = false;
     int m_listenerToken = 0;

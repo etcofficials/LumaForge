@@ -229,6 +229,11 @@ void MediaPanel::updateEmptyState() {
     m_stack->setCurrentWidget(m_gridButton->isChecked() ? static_cast<QWidget*>(m_grid) : static_cast<QWidget*>(m_list));
 }
 
+void MediaPanel::revealMedia(project::MediaId id) {
+    if (!m_search->text().isEmpty()) m_search->clear();
+    selectMedia({id});
+}
+
 void MediaPanel::selectMedia(const QList<project::MediaId>& ids) {
     auto* sel = m_grid->selectionModel();
     sel->clearSelection();

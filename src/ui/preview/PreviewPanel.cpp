@@ -105,6 +105,11 @@ PreviewPanel::PreviewPanel(ActionRegistry& actions, PlaybackController& playback
     m_totalTime->setToolTip(tr("Duration"));
     row->addWidget(m_totalTime);
     layout->addWidget(transport);
+    // When the viewer is narrow, the informational labels give way first.
+    for (QLabel* l : {m_sourceLabel, m_statsLabel}) {
+        l->setMinimumWidth(0);
+        l->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    }
     // Timecodes never get squeezed: their width is that of the widest value.
     for (QLabel* l : {m_currentTime, m_totalTime}) {
         l->ensurePolished();

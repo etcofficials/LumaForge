@@ -25,8 +25,13 @@ struct SequenceEdit {
     std::vector<Clip> modified;     // complete new state of existing clips
     std::vector<Track> tracks;      // complete new state of existing tracks
     std::optional<SequenceMarks> marks;   // new In/Out points
+    // Structural track changes. Applied in this order: remove, insert, reorder, then `tracks`.
+    std::vector<TrackId> tracksRemoved;
+    std::vector<std::pair<std::size_t, Track>> tracksAdded;   // display index at insertion time + track
+    std::optional<std::vector<TrackId>> trackOrder;           // complete new display order
 
-    [[nodiscard]] bool empty() const noexcept { return added.empty() && removed.empty() && modified.empty() && tracks.empty() && !marks; }
+    [[nodiscard]] bool touchesTracks() const noexcept { return !tracks.empty() || !tracksRemoved.empty() || !tracksAdded.empty() || trackOrder.has_value(); }
+    [[nodiscard]] bool empty() const noexcept { return added.empty() && removed.empty() && modified.empty() && !touchesTracks() && !marks; }
     // Affected clip ids (for change notifications and selection).
     [[nodiscard]] std::vector<ClipId> clipIds() const;
     void add(Clip c) { added.push_back(std::move(c)); }
@@ -61,7 +66,7 @@ private:
     bool m_captured = false;
     std::vector<std::pair<std::size_t, Clip>> m_removedBefore;   // original index + clip
     std::vector<Clip> m_modifiedBefore;
-    std::vector<Track> m_tracksBefore;
+    std::vector<Track> m_tracksBefore;   // the whole track list (tracks are few)
     SequenceMarks m_marksBefore;
 };
 

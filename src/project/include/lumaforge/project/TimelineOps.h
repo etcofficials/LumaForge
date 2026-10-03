@@ -100,6 +100,24 @@ std::vector<TimePoint> editPoints(const Sequence& seq);
 std::optional<TimePoint> previousEditPoint(const Sequence& seq, TimePoint t);
 std::optional<TimePoint> nextEditPoint(const Sequence& seq, TimePoint t);
 
+// ---- tracks. Video tracks are always displayed above audio tracks; default
+// names ("V1", "A2") are renumbered by position after structural edits,
+// custom names are kept.
+
+// New track of `kind` inserted at display index `index` (clamped into the kind's
+// region; -1 = above the top video track / below the last audio track).
+SequenceEdit addTrack(Document& doc, TrackKind kind, int index = -1);
+// Removes a track and its clips. Refused (empty) for the last track of a kind.
+SequenceEdit removeTrack(Document& doc, TrackId id);
+// A copy of the track (settings + clips with new ids) directly above it.
+SequenceEdit duplicateTrack(Document& doc, TrackId id);
+// Moves a track up (-1) or down (+1) within its kind's region.
+SequenceEdit moveTrack(Document& doc, TrackId id, int delta);
+SequenceEdit renameTrack(Document& doc, TrackId id, const std::string& name);
+SequenceEdit setTrackHeight(Document& doc, TrackId id, int height);
+// Display names after renumbering (exposed for tests).
+std::vector<Track> renumbered(std::vector<Track> tracks);
+
 // Clip ids plus their linked partners (deduplicated).
 std::vector<ClipId> withLinked(const Sequence& seq, const std::vector<ClipId>& ids);
 

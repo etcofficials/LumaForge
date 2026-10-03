@@ -11,9 +11,11 @@ SequenceProgram::SequenceProgram(const Project& project)
     const auto& seq = project.sequence;
     m_duration = seq.duration();
 
+    bool anyVideoSolo = false;
+    for (const Track* t : seq.videoTracksBottomUp()) anyVideoSolo = anyVideoSolo || t->solo;
     for (const Track* track : seq.videoTracksBottomUp()) {
         std::vector<VisualEntry> entries;
-        if (!track->muted) {
+        if (!track->muted && (!anyVideoSolo || track->solo)) {
             for (const Clip& c : seq.clips) {
                 if (c.track != track->id || !isVisualClip(c.kind) || !c.enabled) continue;
                 VisualEntry e;

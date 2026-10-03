@@ -42,16 +42,23 @@ void SequenceEditCommand::redo() {
             for (std::size_t i = 0; i < seq.clips.size(); ++i) if (seq.clips[i].id == id) { m_removedBefore.emplace_back(i, seq.clips[i]); break; }
         }
         for (const auto& m : m_edit.modified) if (const auto* c = seq.findClip(m.id)) m_modifiedBefore.push_back(*c);
-        for (const auto& t : m_edit.tracks) if (const auto* o = seq.findTrack(t.id)) m_tracksBefore.push_back(*o);
+        if (m_edit.touchesTracks()) m_tracksBefore = seq.tracks;
         m_marksBefore = SequenceMarks{seq.markIn, seq.markOut};
     }
     // Remove (highest index first keeps the recorded indices meaningful for undo)
     for (auto id : m_edit.removed) std::erase_if(seq.clips, [id](const Clip& c) { return c.id == id; });
     for (const auto& m : m_edit.modified) if (auto* c = seq.findClip(m.id)) *c = m;
     for (const auto& a : m_edit.added) seq.clips.push_back(a);
+    for (auto id : m_edit.tracksRemoved) std::erase_if(seq.tracks, [id](const Track& t) { return t.id == id; });
+    for (const auto& [index, track] : m_edit.tracksAdded) seq.tracks.insert(seq.tracks.begin() + static_cast<std::ptrdiff_t>(std::min(index, seq.tracks.size())), track);
+    if (m_edit.trackOrder) {
+        std::vector<Track> ordered;
+        for (auto id : *m_edit.trackOrder) if (const Track* t = seq.findTrack(id)) ordered.push_back(*t);
+        if (ordered.size() == seq.tracks.size()) seq.tracks = std::move(ordered);
+    }
     for (const auto& t : m_edit.tracks) if (auto* o = seq.findTrack(t.id)) *o = t;
     if (m_edit.marks) { seq.markIn = m_edit.marks->in; seq.markOut = m_edit.marks->out; }
-    notify(!m_edit.tracks.empty());
+    notify(m_edit.touchesTracks());
 }
 
 void SequenceEditCommand::undo() {
@@ -62,9 +69,9 @@ void SequenceEditCommand::undo() {
     auto removed = m_removedBefore;
     std::sort(removed.begin(), removed.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
     for (const auto& [index, clip] : removed) seq.clips.insert(seq.clips.begin() + static_cast<std::ptrdiff_t>(std::min(index, seq.clips.size())), clip);
-    for (const auto& t : m_tracksBefore) if (auto* o = seq.findTrack(t.id)) *o = t;
+    if (m_edit.touchesTracks()) seq.tracks = m_tracksBefore;
     if (m_edit.marks) { seq.markIn = m_marksBefore.in; seq.markOut = m_marksBefore.out; }
-    notify(!m_edit.tracks.empty());
+    notify(m_edit.touchesTracks());
 }
 
 bool SequenceEditCommand::mergeWith(const cmd::Command& next) {
@@ -73,7 +80,7 @@ bool SequenceEditCommand::mergeWith(const cmd::Command& next) {
     if (!other) return false;
     // Only pure modifications of the same clips coalesce.
     if (!m_edit.added.empty() || !m_edit.removed.empty() || !other->m_edit.added.empty() || !other->m_edit.removed.empty()) return false;
-    if (!m_edit.tracks.empty() || !other->m_edit.tracks.empty()) return false;
+    if (m_edit.touchesTracks() || other->m_edit.touchesTracks()) return false;
     if (m_edit.marks || other->m_edit.marks) return false;
     if (m_edit.modified.size() != other->m_edit.modified.size()) return false;
     for (const auto& m : other->m_edit.modified) {

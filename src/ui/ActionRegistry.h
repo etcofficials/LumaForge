@@ -33,7 +33,10 @@ enum class ActionId {
     ClipSplit, ClipTrimStartToPlayhead, ClipTrimEndToPlayhead, ClipNudgeLeft, ClipNudgeRight, ClipNudgeLeftLarge, ClipNudgeRightLarge,
     ClipMoveToPlayhead, ClipEnable, ClipLift, ClipExtract,
     // Timeline
-    TimelineZoomIn, TimelineZoomOut, TimelineZoomFit, TimelineSnap, TimelineAddText,
+    TimelineZoomIn, TimelineZoomOut, TimelineZoomFit, TimelineSnap, TimelineAddText, TimelineExpand,
+    TimelineAddVideoTrack, TimelineAddAudioTrack,
+    TrackAddAbove, TrackAddBelow, TrackDuplicate, TrackDelete, TrackRename, TrackMoveUp, TrackMoveDown, TrackLock, TrackMute, TrackSolo,
+    ClipSpeed, ClipProperties, ClipRevealInMedia,
     // Viewer
     ViewerZoomFit, ViewerZoom25, ViewerZoom50, ViewerZoom100, ViewerZoom200, ViewerFullscreen,
     QualityAuto, QualityFull, QualityHalf, QualityQuarter, QualityEighth,
