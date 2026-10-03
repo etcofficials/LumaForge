@@ -1,6 +1,7 @@
 #include "ui/export/ExportSettingsPanel.h"
 
 #include "lumaforge/core/StringUtil.h"
+#include "lumaforge/project/Subtitles.h"
 #include "ui/AppPaths.h"
 #include "ui/Timecode.h"
 #include "ui/export/ExportController.h"
@@ -130,6 +131,11 @@ ExportSettingsPanel::ExportSettingsPanel(project::Document& doc, ExportControlle
     form->addRow(tr("Range"), m_range);
     m_fastStart = new QCheckBox(tr("Fast start (index first: plays while downloading)"), this);
     form->addRow(QString(), m_fastStart);
+    m_burnSubtitles = new QCheckBox(tr("Burn subtitles into the picture"), this);
+    m_burnSubtitles->setChecked(true);
+    m_subtitleSidecar = new QCheckBox(tr("Also save subtitles as .srt next to the video"), this);
+    form->addRow(tr("Subtitles"), m_burnSubtitles);
+    form->addRow(QString(), m_subtitleSidecar);
 
     m_summary = new QLabel(this);
     m_summary->setObjectName(QStringLiteral("exportSummary"));
@@ -183,6 +189,8 @@ ExportSettingsPanel::ExportSettingsPanel(project::Document& doc, ExportControlle
     connect(m_bitrate, &QSpinBox::valueChanged, this, [this] { markCustom(); updateSummary(); });
     connect(m_audio, &QCheckBox::toggled, this, [this] { markCustom(); updateSummary(); });
     connect(m_fastStart, &QCheckBox::toggled, this, &ExportSettingsPanel::updateSummary);
+    connect(m_burnSubtitles, &QCheckBox::toggled, this, &ExportSettingsPanel::updateSummary);
+    connect(m_subtitleSidecar, &QCheckBox::toggled, this, &ExportSettingsPanel::updateSummary);
     connect(m_export, &QPushButton::clicked, this, [this] { startExport(); });
     connect(frame, &QPushButton::clicked, this, &ExportSettingsPanel::exportFrameRequested);
 
@@ -308,6 +316,8 @@ ExportSettings ExportSettingsPanel::settings() const {
     s.includeAudio = m_audio->isChecked();
     s.audioKbps = m_audioBitrate->currentData().toInt();
     s.fastStart = m_fastStart->isChecked();
+    s.burnSubtitles = m_burnSubtitles->isChecked();
+    s.subtitleSidecar = m_subtitleSidecar->isChecked() && m_subtitleSidecar->isEnabled();
     const auto& seq = m_doc.project().sequence;
     if (m_range->currentIndex() == 1 && seq.hasInOut()) {
         s.rangeStart = seq.markIn;
@@ -348,6 +358,9 @@ void ExportSettingsPanel::updateSummary() {
     m_audioBitrate->setEnabled(m_audio->isChecked());
     const auto c = static_cast<Container>(m_container->currentData().toInt());
     m_fastStart->setEnabled(c != Container::Mkv);
+    const bool hasSubtitles = !project::subtitleCues(project.sequence).empty();
+    m_burnSubtitles->setEnabled(hasSubtitles);
+    m_subtitleSidecar->setEnabled(hasSubtitles);
     m_range->setItemText(1, project.sequence.hasInOut() ? tr("In to Out (%1)").arg(formatClock(project.sequence.markOut - project.sequence.markIn)) : tr("In to Out (set I and O first)"));
     if (!project.sequence.hasInOut() && m_range->currentIndex() == 1) m_range->setCurrentIndex(0);
 

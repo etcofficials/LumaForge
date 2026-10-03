@@ -68,6 +68,8 @@ private:
     QComboBox* m_audioBitrate;
     QComboBox* m_range;
     QCheckBox* m_fastStart;
+    QCheckBox* m_burnSubtitles;
+    QCheckBox* m_subtitleSidecar;
     QLabel* m_summary;
     QLabel* m_problems;
     QPushButton* m_export;

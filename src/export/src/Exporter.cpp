@@ -9,6 +9,9 @@
 #include "lumaforge/playback/LayerFactory.h"
 #include "lumaforge/playback/SequenceProgram.h"
 #include "lumaforge/rendering/Compositor.h"
+#include "lumaforge/project/Subtitles.h"
+
+#include <fstream>
 
 #include <chrono>
 #include <filesystem>
@@ -165,7 +168,10 @@ Result<media::Image> Exporter::renderFrame(const project::Project& snapshot, Tim
     return img;
 }
 
-Result<ExportResult> Exporter::run(const project::Project& snapshot, const ExportSettings& settings, const ProgressFn& progress, const std::atomic<bool>& cancel) {
+Result<ExportResult> Exporter::run(const project::Project& original, const ExportSettings& settings, const ProgressFn& progress, const std::atomic<bool>& cancel) {
+    // Subtitles not burnt in: their tracks are left out of the picture.
+    project::Project snapshot = original;
+    if (!settings.burnSubtitles) for (auto& t : snapshot.sequence.tracks) if (t.subtitles) t.muted = true;
     Impl& d = *m_impl;
     using Clock = std::chrono::steady_clock;
     const auto started = Clock::now();
@@ -283,6 +289,17 @@ Result<ExportResult> Exporter::run(const project::Project& snapshot, const Expor
     auto probe = media::MediaProbe::probe(settings.outputPath);
     if (!probe) return Error{"The exported file could not be read back.", probe.error().fullText()};
     if (!probe->hasVideo()) return Error{"The exported file has no video stream."};
+    if (settings.subtitleSidecar) {
+        const auto cues = project::subtitleCues(original.sequence, range);
+        if (!cues.empty()) {
+            auto srt = finalPath;
+            srt.replace_extension(".srt");
+            std::ofstream out(srt, std::ios::binary);
+            out << project::writeSrt(cues);
+            if (!out) LF_LOG_WARN(kLog, "could not write subtitles {}", fromPath(srt));
+            else LF_LOG_INFO(kLog, "wrote {} subtitle cues to {}", cues.size(), fromPath(srt));
+        }
+    }
     result.path = settings.outputPath;
     result.frames = total;
     result.width = w;

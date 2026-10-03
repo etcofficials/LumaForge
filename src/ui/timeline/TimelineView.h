@@ -166,6 +166,7 @@ private:
         bool muted = false;
         bool locked = false;
         bool solo = false;
+        bool subtitles = false;
     };
     struct TickSpec {
         Ticks major;

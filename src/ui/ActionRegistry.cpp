@@ -153,6 +153,9 @@ const ActionDef kActions[] = {
     {ActionId::MarkerAdd, "markerAdd", "Add &Marker", "marker", C::Timeline, Shortcut{Qt::Key_M}, {}, "Add a marker at the playhead"},
     {ActionId::MarkerNext, "markerNext", "Next Mar&ker", nullptr, C::Playback, Shortcut{SHIFT | Qt::Key_M}, {}, "Move the playhead to the next marker"},
     {ActionId::MarkerPrevious, "markerPrevious", "Previous Marke&r", nullptr, C::Playback, Shortcut{CTRL | SHIFT | Qt::Key_M}, {}, "Move the playhead to the previous marker"},
+    {ActionId::SubtitleAdd, "subtitleAdd", "Add S&ubtitle", nullptr, C::Text, Shortcut{SHIFT | Qt::Key_T}, {}, "Add a 2 s subtitle at the playhead on the subtitle track (created when missing)"},
+    {ActionId::SubtitlesImport, "subtitlesImport", "&Import Subtitles…", nullptr, C::Text, {}, {}, "Read an .srt or .vtt file onto the subtitle track"},
+    {ActionId::SubtitlesExport, "subtitlesExport", "E&xport Subtitles…", nullptr, C::Text, {}, {}, "Write the subtitle track as .srt or .vtt", false, false},
     {ActionId::TimelineAddText, "timelineAddText", "Add &Text",            "text",        C::Text, Shortcut{CTRL | Qt::Key_T}, {}, "Add a text clip at the playhead on the top video track"},
 
     // ---- Viewer

@@ -24,6 +24,7 @@ struct Track {
     bool locked = false;       // no edits
     bool solo = false;
     int height = 0;            // lane height in the timeline, pixels; 0 = default for the kind
+    bool subtitles = false;    // video track holding subtitle cues (text clips); see Subtitles.h
     friend bool operator==(const Track&, const Track&) = default;
 };
 

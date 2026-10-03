@@ -32,6 +32,8 @@ struct ExportSettings {
     TimePoint rangeStart{0};             // sequence time
     TimePoint rangeEnd{-1};              // -1 = end of the sequence
     bool fastStart = true;               // MP4/MOV: index at the front, plays while downloading
+    bool burnSubtitles = true;           // render subtitle tracks into the picture
+    bool subtitleSidecar = false;        // also write <name>.srt next to the video
 };
 
 struct ExportPreset {

@@ -138,6 +138,7 @@ void TimelineView::rebuildLanes() {
         l.muted = t.muted;
         l.locked = t.locked;
         l.solo = t.solo;
+        l.subtitles = t.subtitles;
         m_lanes.push_back(l);
         y += l.height;
     }
@@ -1793,8 +1794,22 @@ void TimelineView::paintHeaders(QPainter& p) {
         p.fillRect(QRect(0, lane.y, 3, lane.height), lane.kind == TrackKind::Video ? pal.clipVideo : pal.clipAudio);
         p.setPen(lane.muted ? pal.textMuted : pal.textPrimary);
         p.setFont(bold);
-        p.drawText(QRect(12, lane.y, w - 96, lane.height), Qt::AlignLeft | Qt::AlignVCenter,
-                   p.fontMetrics().elidedText(lane.name, Qt::ElideRight, w - 96));
+        const QString laneName = p.fontMetrics().elidedText(lane.name, Qt::ElideRight, w - (lane.subtitles ? 124 : 96));
+        p.drawText(QRect(12, lane.y, w - 96, lane.height), Qt::AlignLeft | Qt::AlignVCenter, laneName);
+        if (lane.subtitles) {
+            // "CC" badge: this track's text clips are subtitles (exported as .srt / .vtt).
+            const int tx = 12 + p.fontMetrics().horizontalAdvance(laneName) + 6;
+            const QRect badge(tx, lane.y + lane.height / 2 - 7, 22, 14);
+            p.save();
+            p.setRenderHint(QPainter::Antialiasing, true);
+            p.setPen(QPen(pal.textSecondary, 1));
+            p.setBrush(Qt::NoBrush);
+            p.drawRoundedRect(QRectF(badge).adjusted(0.5, 0.5, -0.5, -0.5), 3, 3);
+            p.setFont(small);
+            p.drawText(badge, Qt::AlignCenter, QStringLiteral("CC"));
+            p.restore();
+            p.setFont(bold);
+        }
 
         // Toggle buttons: video [eye][L], audio [M][S][L]
         auto button = [&](const QRect& br, const QString& letter, bool on, const QColor& onColor, bool glyphEye = false) {

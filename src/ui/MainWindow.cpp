@@ -13,6 +13,7 @@
 #include "ui/Theme.h"
 #include "ui/Timecode.h"
 #include "lumaforge/project/TimelineOps.h"
+#include "lumaforge/project/Subtitles.h"
 #include "ui/dialogs/CommandPalette.h"
 #include "ui/dialogs/DiagnosticsDialog.h"
 #include "ui/dialogs/ShortcutEditor.h"
@@ -45,6 +46,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QDockWidget>
+#include <QFile>
 #include <QFileDialog>
 #include <QKeyEvent>
 #include <QDragEnterEvent>
@@ -259,6 +261,8 @@ void MainWindow::buildMenus() {
 
     auto* text = menuBar()->addMenu(tr("Te&xt"));
     add(text, {ActionId::TimelineAddText, ActionId::ToolText});
+    text->addSeparator();
+    add(text, {ActionId::SubtitleAdd, ActionId::SubtitlesImport, ActionId::SubtitlesExport});
 
     auto* workspace = menuBar()->addMenu(tr("&Workspace"));
     add(workspace, {ActionId::WorkspaceEdit, ActionId::WorkspaceColor, ActionId::WorkspaceAudio, ActionId::WorkspaceText, ActionId::WorkspaceEffects, ActionId::WorkspaceExport});
@@ -608,6 +612,45 @@ void MainWindow::connectActions() {
         else seekTimeline(TimePoint{m_document->project().sequence.duration().ticks});
     });
     m_actions->connect(ActionId::Export, this, [this] { m_workspaces->switchTo(Workspace::Export); });
+    m_actions->connect(ActionId::SubtitleAdd, this, [this] {
+        project::SequenceEdit edit = project::addSubtitle(*m_document, m_timelinePanel->view()->playhead());
+        if (edit.empty()) return;
+        std::vector<project::ClipId> ids;
+        for (const auto& c : edit.added) ids.push_back(c.id);
+        m_document->push(std::make_unique<project::SequenceEditCommand>(*m_document, tr("Add Subtitle").toStdString(), std::move(edit)));
+        m_timelinePanel->view()->setSelection(ids);
+        m_inspectorPanel->showTab(InspectorTab::Text);
+    });
+    m_actions->connect(ActionId::SubtitlesImport, this, [this] {
+        const QString file = QFileDialog::getOpenFileName(this, tr("Import Subtitles"), QString(), tr("Subtitles (*.srt *.vtt);;All files (*)"));
+        if (file.isEmpty()) return;
+        QFile f(file);
+        if (!f.open(QIODevice::ReadOnly)) { m_toasts->show(tr("Could not open %1").arg(QFileInfo(file).fileName()), ToastHost::Kind::Error); return; }
+        auto cues = project::parseSubtitles(f.readAll().toStdString());
+        if (!cues) { m_toasts->show(QString::fromStdString(cues.error().message), ToastHost::Kind::Error, 6000); return; }
+        project::SequenceEdit edit = project::importSubtitles(*m_document, *cues);
+        m_document->push(std::make_unique<project::SequenceEditCommand>(*m_document, tr("Import Subtitles").toStdString(), std::move(edit)));
+        m_toasts->show(tr("Imported %n subtitle(s)", nullptr, static_cast<int>(cues->size())), ToastHost::Kind::Success);
+    });
+    m_actions->connect(ActionId::SubtitlesExport, this, [this] {
+        const auto cues = project::subtitleCues(m_document->project().sequence);
+        if (cues.empty()) return;
+        QString base = QString::fromStdString(m_document->project().settings.name);
+        if (base.isEmpty()) base = tr("Subtitles");
+        const QString suggested = QDir(AppPaths::path(AppPaths::Kind::Exports)).filePath(base + QStringLiteral(".srt"));
+        QString selected;
+        QString file = QFileDialog::getSaveFileName(this, tr("Export Subtitles"), QDir::toNativeSeparators(suggested), tr("SubRip (*.srt);;WebVTT (*.vtt)"), &selected);
+        if (file.isEmpty()) return;
+        const bool vtt = file.endsWith(QStringLiteral(".vtt"), Qt::CaseInsensitive) || selected.contains(QStringLiteral("vtt"));
+        if (!file.endsWith(vtt ? QStringLiteral(".vtt") : QStringLiteral(".srt"), Qt::CaseInsensitive)) file += vtt ? QStringLiteral(".vtt") : QStringLiteral(".srt");
+        QFile f(file);
+        const std::string data = vtt ? project::writeVtt(cues) : project::writeSrt(cues);
+        if (!f.open(QIODevice::WriteOnly) || f.write(data.data(), static_cast<qint64>(data.size())) != static_cast<qint64>(data.size())) {
+            m_toasts->show(tr("Could not write %1").arg(QFileInfo(file).fileName()), ToastHost::Kind::Error);
+            return;
+        }
+        m_toasts->show(tr("Wrote %n subtitle(s) to %1", nullptr, static_cast<int>(cues.size())).arg(QFileInfo(file).fileName()), ToastHost::Kind::Success);
+    });
     m_actions->connect(ActionId::ExportFrame, this, [this] {
         const TimePoint t = m_timelinePanel->view()->playhead();
         QDir().mkpath(AppPaths::path(AppPaths::Kind::Exports));
@@ -826,6 +869,7 @@ void MainWindow::onDocumentChange(const project::Change& change) {
     const bool hasClips = !m_document->project().sequence.clips.empty();
     m_actions->setEnabled(ActionId::Export, hasClips);
     m_actions->setEnabled(ActionId::ExportFrame, hasClips);
+    m_actions->setEnabled(ActionId::SubtitlesExport, !project::subtitleCues(m_document->project().sequence).empty());
     switch (change.kind) {
         case project::Change::Kind::Reset:
         case project::Change::Kind::Settings:
