@@ -100,6 +100,8 @@ const char* clipKindKey(ClipKind k) {
         case ClipKind::Audio: return "audio";
         case ClipKind::Image: return "image";
         case ClipKind::Text: return "text";
+        case ClipKind::Solid: return "solid";
+        case ClipKind::Adjustment: return "adjustment";
     }
     return "video";
 }
@@ -271,6 +273,12 @@ std::string toJson(const Project& project, const std::string& projectDir) {
     }
     root["media"] = std::move(media);
     root["bins"] = project.bins;
+    json markers = json::array();
+    for (const auto& m : project.sequence.markers) {
+        json jm = {{"id", m.id}, {"time", m.time.ticks}, {"name", m.name}, {"color", m.color}};
+        if (!m.note.empty()) jm["note"] = m.note;
+        markers.push_back(std::move(jm));
+    }
 
     json tracks = json::array();
     for (const auto& t : project.sequence.tracks) {
@@ -283,13 +291,18 @@ std::string toJson(const Project& project, const std::string& projectDir) {
                   {"link", raw(c.link)}, {"transform", write(c.transform)}, {"crop", write(c.crop)}, {"color", write(c.color)},
                   {"effects", write(c.effects)}, {"audio", write(c.audio)}, {"enabled", c.enabled}};
         if (!c.animation.empty()) j["animation"] = writeAnimation(c.animation);
+        if (c.mask.isActive()) {
+            j["mask"] = {{"shape", c.mask.shape == MaskShape::Ellipse ? "ellipse" : "rectangle"}, {"centerX", c.mask.centerX}, {"centerY", c.mask.centerY},
+                         {"width", c.mask.width}, {"height", c.mask.height}, {"feather", c.mask.feather}, {"invert", c.mask.invert}};
+        }
         if (c.transitionIn) j["transitionIn"] = {{"type", transitionInfo(c.transitionIn->type).id}, {"duration", c.transitionIn->duration.ticks}};
         if (c.transitionOut) j["transitionOut"] = {{"type", transitionInfo(c.transitionOut->type).id}, {"duration", c.transitionOut->duration.ticks}};
         if (c.kind == ClipKind::Text) j["text"] = write(c.text);
+        if (c.kind == ClipKind::Solid) j["solidColor"] = {c.solidColor.r, c.solidColor.g, c.solidColor.b, c.solidColor.a};
         clips.push_back(std::move(j));
     }
     root["sequence"] = {{"tracks", std::move(tracks)}, {"clips", std::move(clips)},
-                        {"markIn", project.sequence.markIn.ticks}, {"markOut", project.sequence.markOut.ticks}};
+                        {"markIn", project.sequence.markIn.ticks}, {"markOut", project.sequence.markOut.ticks}, {"markers", std::move(markers)}};
     return root.dump(2);
 }
 
@@ -365,7 +378,11 @@ Result<LoadResult> fromJson(const std::string& text, const std::string& projectD
                 getId(j, "id", c.id); getId(j, "track", c.track); getId(j, "media", c.media); getId(j, "link", c.link); get(j, "name", c.name);
                 std::string kind = "video";
                 get(j, "kind", kind);
-                c.kind = kind == "audio" ? ClipKind::Audio : kind == "image" ? ClipKind::Image : kind == "text" ? ClipKind::Text : ClipKind::Video;
+                c.kind = kind == "audio" ? ClipKind::Audio : kind == "image" ? ClipKind::Image : kind == "text" ? ClipKind::Text
+                       : kind == "solid" ? ClipKind::Solid : kind == "adjustment" ? ClipKind::Adjustment : ClipKind::Video;
+                if (auto sc = j.find("solidColor"); sc != j.end() && sc->is_array() && sc->size() == 4) {
+                    c.solidColor = {(*sc)[0].get<float>(), (*sc)[1].get<float>(), (*sc)[2].get<float>(), (*sc)[3].get<float>()};
+                }
                 getTicks(j, "start", c.start); getTicks(j, "duration", c.duration); getTicks(j, "sourceIn", c.sourceIn); getRational(j, "speed", c.speed);
                 get(j, "enabled", c.enabled);
                 if (auto s = j.find("transform"); s != j.end()) read(*s, c.transform);
@@ -373,6 +390,14 @@ Result<LoadResult> fromJson(const std::string& text, const std::string& projectD
                 if (auto s = j.find("color"); s != j.end()) read(*s, c.color);
                 if (auto s = j.find("effects"); s != j.end()) read(*s, c.effects);
                 if (auto s = j.find("animation"); s != j.end()) readAnimation(*s, c.animation);
+                if (auto mk = j.find("mask"); mk != j.end() && mk->is_object()) {
+                    std::string shape;
+                    get(*mk, "shape", shape);
+                    c.mask.shape = shape == "ellipse" ? MaskShape::Ellipse : shape == "rectangle" ? MaskShape::Rectangle : MaskShape::None;
+                    get(*mk, "centerX", c.mask.centerX); get(*mk, "centerY", c.mask.centerY);
+                    get(*mk, "width", c.mask.width); get(*mk, "height", c.mask.height);
+                    get(*mk, "feather", c.mask.feather); get(*mk, "invert", c.mask.invert);
+                }
                 c.transitionIn = readTransition(j, "transitionIn");
                 c.transitionOut = readTransition(j, "transitionOut");
                 if (auto s = j.find("audio"); s != j.end()) read(*s, c.audio);
@@ -382,11 +407,32 @@ Result<LoadResult> fromJson(const std::string& text, const std::string& projectD
                     LF_LOG_WARN(kLog, "skipping invalid clip {} in project file", raw(c.id));
                     continue;
                 }
-                if (c.kind != ClipKind::Text && !p.findMedia(c.media)) {
+                if (!isGeneratedClip(c.kind) && !p.findMedia(c.media)) {
                     LF_LOG_WARN(kLog, "skipping clip {} referencing unknown media {}", raw(c.id), raw(c.media));
                     continue;
                 }
                 p.sequence.clips.push_back(std::move(c));
+            }
+        }
+        p.sequence.markers.clear();
+        if (auto ms = seq->find("markers"); ms != seq->end() && ms->is_array()) {
+            for (const auto& jm : *ms) {
+                if (!jm.is_object()) continue;
+                Marker m;
+                get(jm, "id", m.id);
+                getTicks(jm, "time", m.time);
+                get(jm, "name", m.name);
+                get(jm, "color", m.color);
+                get(jm, "note", m.note);
+                if (m.time.ticks < 0) continue;
+                p.sequence.markers.push_back(std::move(m));
+            }
+            std::stable_sort(p.sequence.markers.begin(), p.sequence.markers.end(), [](const Marker& a, const Marker& b) { return a.time < b.time; });
+            // Ids must be unique: renumber duplicates after the highest one.
+            std::uint64_t next = 1;
+            for (const auto& m : p.sequence.markers) next = std::max(next, m.id + 1);
+            for (std::size_t i = 0; i < p.sequence.markers.size(); ++i) {
+                for (std::size_t k = 0; k < i; ++k) if (p.sequence.markers[k].id == p.sequence.markers[i].id || p.sequence.markers[i].id == 0) { p.sequence.markers[i].id = next++; break; }
             }
         }
         getTicks(*seq, "markIn", p.sequence.markIn);

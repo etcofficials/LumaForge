@@ -8,6 +8,8 @@
 #include "ui/inspector/EffectsSection.h"
 #include "ui/inspector/TextSections.h"
 #include "ui/inspector/TransitionSection.h"
+#include "ui/inspector/MaskSection.h"
+#include "ui/inspector/GeneratedSections.h"
 #include "ui/inspector/TransformSection.h"
 #include "ui/widgets/EmptyState.h"
 #include "ui/widgets/PanelHeader.h"
@@ -103,7 +105,10 @@ InspectorPanel::InspectorPanel(Document& doc, QWidget* parent) : QWidget(parent)
     addSection(new TextStyleSection(TextStyleSection::Part::Shadow, *this, host));
     addSection(new TextStyleSection(TextStyleSection::Part::Background, *this, host));
     addSection(new TransformSection(*this, host));
+    addSection(new SolidSection(*this, host));
+    addSection(new AdjustmentSection(*this, host));
     addSection(new CropSection(*this, host));
+    addSection(new MaskSection(*this, host));
     addSection(new ColorSection(*this, host));
     addSection(new EffectsSection(*this, host));
     addSection(new AudioSection(*this, host));

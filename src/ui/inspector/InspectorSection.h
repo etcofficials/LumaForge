@@ -96,6 +96,8 @@ enum : int {
     Volume, Mute, FadeIn, FadeOut,
     Speed,
     CropFeather, Pan, Preset, Keyframe,
+    MaskShape, MaskCenterX, MaskCenterY, MaskWidth, MaskHeight, MaskFeather, MaskInvert,
+    SolidColor,
     ResetGroup = 900,
 };
 }

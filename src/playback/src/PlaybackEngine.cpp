@@ -436,7 +436,22 @@ void PlaybackEngine::renderOnce(TimePoint t, bool vsync) {
             layer.transform = req.transform;
             layer.transform.scaleX *= std::max(1.0f, static_cast<float>(fw) / static_cast<float>(fh));
             layer.transform.scaleY *= std::max(1.0f, static_cast<float>(fh) / static_cast<float>(fw));
+            layer.crop = req.crop;
+            layer.mask = req.mask;
+            layer.color = req.color;
+            layer.effects = req.effects;
             layer.fitToFrame = true;
+            m_layers.push_back(std::move(layer));
+            continue;
+        }
+        if (req.path.empty() && req.adjustment) {
+            render::Layer layer;
+            layer.adjustment = true;
+            layer.transform = req.transform;
+            layer.crop = req.crop;
+            layer.mask = req.mask;
+            layer.color = req.color;
+            layer.effects = req.effects;
             m_layers.push_back(std::move(layer));
             continue;
         }
@@ -449,6 +464,7 @@ void PlaybackEngine::renderOnce(TimePoint t, bool vsync) {
             layer.texture = std::move(tex);
             layer.transform = req.transform;
             layer.crop = req.crop;
+            layer.mask = req.mask;
             layer.color = req.color;
             layer.effects = req.effects;
             layer.fitToFrame = true;
@@ -466,6 +482,7 @@ void PlaybackEngine::renderOnce(TimePoint t, bool vsync) {
         layer.texture = std::move(tex);
         layer.transform = req.transform;
         layer.crop = req.crop;
+        layer.mask = req.mask;
         layer.color = req.color;
         layer.effects = req.effects;
         layer.fitToFrame = req.fitToFrame;

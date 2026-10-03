@@ -31,6 +31,8 @@ struct alignas(16) LayerConstants {
     float misc[4];
     float fx[4];          // grayscale mix, sepia mix, blur radius (texels), sharpen amount
     float fx2[4];         // invert mix, posterize levels, pixelate block (source pixels), unused
+    float mask0[4];       // centre x, centre y, half width, half height (uv)
+    float mask1[4];       // feather (fraction), shape (0 none, 1 rect, 2 ellipse), invert, unused
 };
 static_assert(sizeof(LayerConstants) % 16 == 0);
 
@@ -247,6 +249,15 @@ void Compositor::drawLayer(const Layer& layer, int frameW, int frameH, int targe
     if (fx.invert > 0.0f) flags |= 128;
     if (fx.posterize > 0.0f) flags |= 256;
     if (fx.pixelate > 1.0f) flags |= 512;
+    if (layer.mask.isActive()) {
+        k.mask0[0] = layer.mask.centerX;
+        k.mask0[1] = layer.mask.centerY;
+        k.mask0[2] = std::max(1e-4f, layer.mask.width * 0.5f);
+        k.mask0[3] = std::max(1e-4f, layer.mask.height * 0.5f);
+        k.mask1[0] = std::clamp(layer.mask.feather, 0.0f, 1.0f);
+        k.mask1[1] = layer.mask.shape == MaskShape::Ellipse ? 2.0f : 1.0f;
+        k.mask1[2] = layer.mask.invert ? 1.0f : 0.0f;
+    }
     k.fx2[0] = fx.invert;
     k.fx2[1] = fx.posterize;
     k.fx2[2] = fx.pixelate;
@@ -299,6 +310,24 @@ Status Compositor::compose(RenderTarget& target, int frameWidth, int frameHeight
     ctx->PSSetSamplers(0, 1, samplers);
 
     for (const Layer& layer : layers) {
+        if (layer.adjustment) {
+            // Snapshot what is below and draw it back through this layer.
+            auto scratch = m_pool->acquireBgra(target.width(), target.height(), false);
+            if (!scratch || !(*scratch)->plane(0)) continue;
+            ID3D11RenderTargetView* unbind[] = {nullptr};
+            ctx->OMSetRenderTargets(1, unbind, nullptr);
+            ctx->CopyResource((*scratch)->plane(0), target.texture());
+            ctx->OMSetRenderTargets(1, rtvs, nullptr);
+            Layer copy = layer;
+            copy.texture = *scratch;
+            copy.fitToFrame = true;                  // the snapshot covers the frame exactly
+            copy.transform.positionX = copy.transform.positionY = 0.0f;
+            copy.transform.scaleX = copy.transform.scaleY = 1.0f;
+            copy.transform.rotation = 0.0f;
+            copy.transform.flipH = copy.transform.flipV = false;
+            drawLayer(copy, frameWidth, frameHeight, target.width(), target.height());
+            continue;
+        }
         if (!layer.texture) continue;
         drawLayer(layer, frameWidth, frameHeight, target.width(), target.height());
     }

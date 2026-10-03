@@ -7,6 +7,7 @@
 #include "lumaforge/project/Ids.h"
 #include "lumaforge/project/Transitions.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -26,9 +27,13 @@ struct Track {
     friend bool operator==(const Track&, const Track&) = default;
 };
 
-enum class ClipKind { Video, Audio, Image, Text };
+// Solid: a full-frame colour. Adjustment: applies its colour correction,
+// effects and mask to everything composited below it on lower tracks.
+enum class ClipKind { Video, Audio, Image, Text, Solid, Adjustment };
 
 [[nodiscard]] constexpr bool isVisualClip(ClipKind k) noexcept { return k != ClipKind::Audio; }
+// Made by LumaForge itself rather than read from a media file.
+[[nodiscard]] constexpr bool isGeneratedClip(ClipKind k) noexcept { return k == ClipKind::Text || k == ClipKind::Solid || k == ClipKind::Adjustment; }
 
 struct AudioParams {
     float volume = 1.0f;       // linear gain; the UI shows dB
@@ -55,10 +60,12 @@ struct Clip {
 
     Transform2D transform;
     Crop crop;
+    Mask mask;
     ColorAdjust color;
     std::vector<Effect> effects;   // ordered; see applyEffects()
     AudioParams audio;
     TextParams text;
+    ColorRgba solidColor{0.0f, 0.0f, 0.0f, 1.0f};   // Solid clips
     std::vector<KeyTrack> animation;   // keyframed properties (see Animation.h); empty = static
     std::optional<Transition> transitionIn;    // visual clips only; see Transitions.h
     std::optional<Transition> transitionOut;
@@ -134,6 +141,16 @@ struct TransitionWindow {
 // The clip touching `clip`'s start (atStart) or end on its track, if any.
 [[nodiscard]] const Clip* touchingNeighbour(const std::vector<const Clip*>& trackClipsSorted, const Clip& clip, bool atStart);
 
+// A named point on the sequence (chapters, notes, sync points).
+struct Marker {
+    std::uint64_t id = 0;      // unique within the sequence
+    TimePoint time;
+    std::string name;
+    int color = 0;             // index into the UI's marker palette
+    std::string note;
+    friend bool operator==(const Marker&, const Marker&) = default;
+};
+
 // Tracks are stored in display order, top to bottom (V2, V1, A1, A2).
 // Video compositing order is bottom-up in display terms: V1 under V2.
 struct Sequence {
@@ -141,6 +158,7 @@ struct Sequence {
     std::vector<Clip> clips;
     TimePoint markIn{-1};    // In/Out range (loop, lift/extract, export range); -1 = unset
     TimePoint markOut{-1};
+    std::vector<Marker> markers;   // sorted by time
 
     [[nodiscard]] bool hasInOut() const noexcept { return markIn.ticks >= 0 && markOut.ticks > markIn.ticks; }
 

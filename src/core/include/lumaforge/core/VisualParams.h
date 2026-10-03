@@ -32,6 +32,22 @@ struct Crop {
     friend constexpr bool operator==(const Crop&, const Crop&) = default;
 };
 
+// A shape that limits where a layer is visible, in the layer's own picture
+// space (0..1 across the source), so it follows position, scale and rotation.
+enum class MaskShape { None, Rectangle, Ellipse };
+
+struct Mask {
+    MaskShape shape = MaskShape::None;
+    float centerX = 0.5f;     // 0..1 of the picture width
+    float centerY = 0.5f;     // 0..1 of the picture height
+    float width = 0.5f;       // 0..1 of the picture width
+    float height = 0.5f;      // 0..1 of the picture height
+    float feather = 0.1f;     // soft edge as a fraction of the shape size, 0 = hard
+    bool invert = false;      // show outside the shape instead
+    [[nodiscard]] constexpr bool isActive() const noexcept { return shape != MaskShape::None; }
+    friend constexpr bool operator==(const Mask&, const Mask&) = default;
+};
+
 // Basic colour correction. Neutral values are the defaults.
 struct ColorAdjust {
     float exposure = 0.0f;     // stops, -3..3

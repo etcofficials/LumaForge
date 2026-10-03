@@ -26,6 +26,7 @@
 #include "ui/panels/ProjectInfoPanel.h"
 #include "ui/panels/TitlesBrowserPanel.h"
 #include "ui/panels/TransitionsBrowserPanel.h"
+#include "ui/panels/MarkersPanel.h"
 #include "ui/playback/PlaybackController.h"
 #include "ui/preview/PreviewPanel.h"
 #include "ui/preview/PreviewWidget.h"
@@ -211,6 +212,8 @@ void MainWindow::buildMenus() {
     add(playback, {ActionId::PlayLoop});
     playback->addSeparator();
     add(playback, {ActionId::MarkIn, ActionId::MarkOut, ActionId::GoToIn, ActionId::GoToOut, ActionId::ClearInOut});
+    playback->addSeparator();
+    add(playback, {ActionId::MarkerNext, ActionId::MarkerPrevious});
 
     auto* clip = menuBar()->addMenu(tr("&Clip"));
     add(clip, {ActionId::EditCut, ActionId::ClipSplit, ActionId::ClipTrimStartToPlayhead, ActionId::ClipTrimEndToPlayhead, ActionId::ClipRippleDelete});
@@ -240,6 +243,10 @@ void MainWindow::buildMenus() {
     add(timeline, {ActionId::TimelineSnap});
     timeline->addSeparator();
     add(timeline, {ActionId::TimelineZoomIn, ActionId::TimelineZoomOut, ActionId::TimelineZoomFit, ActionId::TimelineExpand});
+    timeline->addSeparator();
+    add(timeline, {ActionId::TimelineAddText, ActionId::TimelineAddSolid, ActionId::TimelineAddAdjustment});
+    timeline->addSeparator();
+    add(timeline, {ActionId::MarkerAdd});
 
     auto* audio = menuBar()->addMenu(tr("&Audio"));
     add(audio, {ActionId::AudioMuteClip});
@@ -389,12 +396,14 @@ void MainWindow::buildPanels() {
     m_effectsBrowser = new EffectsBrowserPanel(this);
     m_titlesBrowser = new TitlesBrowserPanel(this);
     m_transitionsBrowser = new TransitionsBrowserPanel(this);
+    m_markersPanel = new MarkersPanel(*m_document, *m_actions, this);
 
     m_browser = new BrowserPanel(this);
     m_browser->addPage(m_mediaPanel, tr("Media"), QStringLiteral("media"), tr("Imported media and bins"));
     m_browser->addPage(m_effectsBrowser, tr("Effects"), QStringLiteral("effects"), tr("Clip effects: drag onto a clip or apply to the selection"));
     m_browser->addPage(m_transitionsBrowser, tr("Transitions"), QStringLiteral("transitions"), tr("Transitions: drag onto a clip edge or add to the selection"));
     m_browser->addPage(m_titlesBrowser, tr("Titles"), QStringLiteral("titles"), tr("Title presets: drag onto the timeline or add at the playhead"));
+    m_browser->addPage(m_markersPanel, tr("Markers"), QStringLiteral("markers"), tr("Sequence markers: jump, rename, colour, copy as chapters"));
     m_browser->addPage(m_projectInfo, tr("Project"), QStringLiteral("project"), tr("Project information and data locations"));
 
     m_editor->setCentralWidget(m_previewPanel);
@@ -527,6 +536,7 @@ void MainWindow::connectActions() {
         }
         m_inspectorPanel->showTab(InspectorTab::Transition);
     });
+    connect(m_markersPanel, &MarkersPanel::seekRequested, this, [this](TimePoint t) { seekTimeline(t); });
     connect(tl, &TimelineView::transitionClicked, this, [this](project::ClipId) { m_inspectorPanel->showTab(InspectorTab::Transition); });
     connect(m_titlesBrowser, &TitlesBrowserPanel::addRequested, this, [this](int preset) {
         m_timelinePanel->view()->addTextClip(preset);
@@ -583,6 +593,12 @@ void MainWindow::connectActions() {
     m_actions->connect(ActionId::GoToEnd, this, [this] {
         if (m_playback->mode() == PlaybackController::Mode::Source) m_playback->goToEnd();
         else seekTimeline(TimePoint{m_document->project().sequence.duration().ticks});
+    });
+    m_actions->connect(ActionId::MarkerNext, this, [this] {
+        if (auto t = project::ops::nextMarker(m_document->project().sequence, m_timelinePanel->view()->playhead())) seekTimeline(*t);
+    });
+    m_actions->connect(ActionId::MarkerPrevious, this, [this] {
+        if (auto t = project::ops::previousMarker(m_document->project().sequence, m_timelinePanel->view()->playhead())) seekTimeline(*t);
     });
     m_actions->connect(ActionId::PrevEdit, this, [this] {
         if (auto t = project::ops::previousEditPoint(m_document->project().sequence, m_timelinePanel->view()->playhead())) seekTimeline(*t);

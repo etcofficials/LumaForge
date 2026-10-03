@@ -16,7 +16,8 @@ class TransformSection final : public InspectorSection {
 public:
     explicit TransformSection(InspectorContext& ctx, QWidget* parent = nullptr);
 
-    [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return project::isVisualClip(kind); }
+    // Adjustment clips always cover the frame: only their mix (opacity) applies, in their own section.
+    [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return project::isVisualClip(kind) && kind != project::ClipKind::Adjustment; }
     [[nodiscard]] InspectorTab tab() const override { return InspectorTab::Transform; }
     void load(const project::Clip& primary, int selectedCount) override;
 
@@ -45,7 +46,7 @@ class CropSection final : public InspectorSection {
 public:
     explicit CropSection(InspectorContext& ctx, QWidget* parent = nullptr);
 
-    [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return kind == project::ClipKind::Video || kind == project::ClipKind::Image; }
+    [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return project::isVisualClip(kind) && kind != project::ClipKind::Text; }
     [[nodiscard]] InspectorTab tab() const override { return InspectorTab::Video; }
     void load(const project::Clip& primary, int selectedCount) override;
 

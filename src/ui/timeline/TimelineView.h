@@ -97,6 +97,12 @@ public slots:
     void pasteOverwrite();     // at the playhead, replacing what is underneath
     void duplicateSelection();
     void addTextClip(int preset = 0);   // 5 s title at the playhead on the top video track
+    // 5 s Solid or Adjustment clip at the playhead on the topmost video track free there.
+    void addGeneratedClip(lf::project::ClipKind kind);
+    void addMarker();                 // at the playhead
+    void renameMarker(std::uint64_t id);
+    [[nodiscard]] static QColor markerColor(int index);
+    [[nodiscard]] static int markerColorCount();
     void addTextClipAt(lf::project::TrackId track, lf::TimePoint at, int preset = 0);
     // Appends an effect to the given clips (visual, unlocked); returns how many changed.
     int addEffect(const std::vector<lf::project::ClipId>& ids, lf::EffectType type);
@@ -302,6 +308,9 @@ private:
     };
     [[nodiscard]] std::vector<TransitionBox> transitionBoxes() const;
     void paintTransitions(QPainter& p);
+    void paintMarkerLines(QPainter& p);
+    [[nodiscard]] const project::Marker* markerAt(const QPoint& pos) const;   // on the ruler
+    void showMarkerMenu(const QPoint& globalPos, std::uint64_t id);
     TimePoint m_dropTime;
 };
 

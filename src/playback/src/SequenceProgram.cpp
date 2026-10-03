@@ -20,7 +20,7 @@ SequenceProgram::SequenceProgram(const Project& project)
                 if (c.track != track->id || !isVisualClip(c.kind) || !c.enabled) continue;
                 VisualEntry e;
                 e.clip = c;
-                if (c.kind != ClipKind::Text) {
+                if (!isGeneratedClip(c.kind)) {
                     const MediaItem* item = project.findMedia(c.media);
                     if (!item || item->offline) continue;
                     e.path = item->path;
@@ -83,10 +83,13 @@ VideoLayerRequest SequenceProgram::layerFor(const VisualEntry& e, TimePoint t) c
     r.transform = e.clip.transform;
     r.crop = e.clip.crop;
     animatedTransform(e.clip, animationTime(e.clip, t), r.transform, r.crop);
+    r.mask = e.clip.mask;
     r.color = e.clip.color;
     applyEffects(e.clip.effects, r.color, r.effects);
     r.fitToFrame = true;
     if (e.clip.kind == ClipKind::Text) r.text = e.clip.text;
+    if (e.clip.kind == ClipKind::Solid) r.solid = e.clip.solidColor;
+    r.adjustment = e.clip.kind == ClipKind::Adjustment;
     return r;
 }
 

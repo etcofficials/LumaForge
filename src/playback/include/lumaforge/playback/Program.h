@@ -20,11 +20,13 @@ struct VideoLayerRequest {
     std::uint64_t layerKey = 0;   // stable identity (clip id) for caches
     Transform2D transform;
     Crop crop;
+    Mask mask;
     ColorAdjust color;
     EffectParams effects;
     bool fitToFrame = true;
     std::optional<TextParams> text;   // generated text layer (path is empty)
     std::optional<ColorRgba> solid;   // generated full-frame colour layer (path is empty)
+    bool adjustment = false;          // applies colour/effects/mask to everything below (path is empty)
 };
 
 // What to mix for one audio-bearing clip at a given program time.

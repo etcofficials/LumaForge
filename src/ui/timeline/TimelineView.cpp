@@ -18,6 +18,8 @@
 #include <QHelpEvent>
 #include <QInputDialog>
 #include <QKeyEvent>
+#include <QLineEdit>
+#include <QMenu>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
@@ -52,6 +54,8 @@ QColor clipColor(ClipKind kind) {
         case ClipKind::Audio: return pal.clipAudio;
         case ClipKind::Image: return QColor(0x8A, 0x5C, 0xB8);
         case ClipKind::Text: return QColor(0xC9, 0x8A, 0x2E);
+        case ClipKind::Solid: return QColor(0x5A, 0x67, 0x78);
+        case ClipKind::Adjustment: return QColor(0x3C, 0x9C, 0x8E);
     }
     return pal.clipVideo;
 }
@@ -671,6 +675,122 @@ void TimelineView::addTextClipAt(TrackId trackId, TimePoint at, int preset) {
     selectAdded(ops::insertClips(m_doc, {c}), tr("Add Text"));
 }
 
+// ---------------------------------------------------------------- markers
+
+int TimelineView::markerColorCount() { return 6; }
+
+QColor TimelineView::markerColor(int index) {
+    static const QColor colors[] = {QColor(0x4C, 0x9A, 0xFF), QColor(0x3F, 0xB9, 0x6B), QColor(0xF2, 0xC1, 0x3A),
+                                    QColor(0xF0, 0x8A, 0x32), QColor(0xE5, 0x53, 0x3D), QColor(0xA8, 0x6B, 0xE8)};
+    return colors[std::clamp(index, 0, markerColorCount() - 1)];
+}
+
+void TimelineView::addMarker() {
+    SequenceEdit edit = ops::addMarker(m_doc.project().sequence, m_playhead);
+    if (!edit.empty()) commit(tr("Add Marker"), std::move(edit));
+}
+
+void TimelineView::renameMarker(std::uint64_t id) {
+    const auto& seq = m_doc.project().sequence;
+    for (const auto& m : seq.markers) {
+        if (m.id != id) continue;
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, tr("Rename Marker"), tr("Name:"), QLineEdit::Normal, QString::fromStdString(m.name), &ok).trimmed();
+        if (!ok || name.isEmpty()) return;
+        Marker n = m;
+        n.name = name.toStdString();
+        commit(tr("Rename Marker"), ops::updateMarker(seq, n));
+        return;
+    }
+}
+
+const Marker* TimelineView::markerAt(const QPoint& pos) const {
+    if (pos.y() >= rulerHeight() || pos.x() < headerWidth()) return nullptr;
+    const Marker* best = nullptr;
+    double bestDist = 6.0;
+    for (const auto& m : m_doc.project().sequence.markers) {
+        const double d = std::abs(xFromTicks(m.time.ticks) - pos.x());
+        if (d <= bestDist) { best = &m; bestDist = d; }
+    }
+    return best;
+}
+
+void TimelineView::showMarkerMenu(const QPoint& globalPos, std::uint64_t id) {
+    const auto& seq = m_doc.project().sequence;
+    const Marker* marker = nullptr;
+    for (const auto& m : seq.markers) if (m.id == id) marker = &m;
+    if (!marker) return;
+    const Marker copy = *marker;
+    QMenu menu(this);
+    connect(menu.addAction(tr("Rename…")), &QAction::triggered, this, [this, id] { renameMarker(id); });
+    QMenu* colors = menu.addMenu(tr("Colour"));
+    for (int i = 0; i < markerColorCount(); ++i) {
+        QPixmap swatch(12, 12);
+        swatch.fill(markerColor(i));
+        auto* a = colors->addAction(QIcon(swatch), QString());
+        a->setCheckable(true);
+        a->setChecked(copy.color == i);
+        a->setText(QStringList{tr("Blue"), tr("Green"), tr("Yellow"), tr("Orange"), tr("Red"), tr("Purple")}.value(i));
+        connect(a, &QAction::triggered, this, [this, copy, i] {
+            Marker n = copy;
+            n.color = i;
+            commit(tr("Marker Colour"), ops::updateMarker(m_doc.project().sequence, n));
+        });
+    }
+    connect(menu.addAction(tr("Move to Playhead")), &QAction::triggered, this, [this, copy] {
+        Marker n = copy;
+        n.time = m_playhead;
+        commit(tr("Move Marker"), ops::updateMarker(m_doc.project().sequence, n));
+    });
+    menu.addSeparator();
+    connect(menu.addAction(tr("Delete Marker")), &QAction::triggered, this, [this, id] {
+        commit(tr("Delete Marker"), ops::removeMarkers(m_doc.project().sequence, {id}));
+    });
+    menu.exec(globalPos);
+}
+
+void TimelineView::paintMarkerLines(QPainter& p) {
+    const auto& markers = m_doc.project().sequence.markers;
+    if (markers.empty()) return;
+    p.save();
+    p.setClipRect(laneArea());
+    for (const auto& m : markers) {
+        const int x = static_cast<int>(std::floor(xFromTicks(m.time.ticks)));
+        if (x < headerWidth() || x > width()) continue;
+        QColor c = markerColor(m.color);
+        c.setAlpha(70);
+        p.setPen(QPen(c, 1, Qt::DashLine));
+        p.drawLine(x, rulerHeight(), x, height());
+    }
+    p.restore();
+}
+
+void TimelineView::addGeneratedClip(ClipKind kind) {
+    const auto& seq = m_doc.project().sequence;
+    const TimeRange range{m_playhead, ops::kDefaultTextDuration};
+    // Topmost unlocked video track with room for the clip; else the topmost (overwrites).
+    const Track* chosen = nullptr;
+    const Track* topmost = nullptr;
+    for (const auto& t : seq.tracks) {
+        if (t.kind != TrackKind::Video || t.locked) continue;
+        if (!topmost) topmost = &t;
+        bool free = true;
+        for (const Clip* c : seq.clipsOnTrack(t.id)) free &= !(c->start < range.end() && range.start < c->end());
+        if (free) { chosen = &t; break; }
+    }
+    if (!chosen) chosen = topmost;
+    if (!chosen) return;
+    Clip c;
+    c.id = m_doc.allocateClipId();
+    c.track = chosen->id;
+    c.kind = kind;
+    c.name = kind == ClipKind::Solid ? tr("Solid").toStdString() : tr("Adjustment").toStdString();
+    c.start = m_playhead;
+    c.duration = ops::kDefaultTextDuration;
+    if (kind == ClipKind::Solid) c.solidColor = ColorRgba{0.12f, 0.14f, 0.18f, 1.0f};
+    selectAdded(ops::insertClips(m_doc, {c}), kind == ClipKind::Solid ? tr("Add Solid") : tr("Add Adjustment Clip"));
+}
+
 int TimelineView::addEffect(const std::vector<ClipId>& ids, EffectType type) {
     SequenceEdit edit = ops::addEffect(m_doc.project().sequence, ids, makeEffect(type));
     const int n = static_cast<int>(edit.modified.size());
@@ -898,7 +1018,13 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
         m_pressMods = e->modifiers();
         if (pos.y() < rulerHeight()) {
             m_gesture = Gesture::Scrub;
-            seekTo(pos.x());
+            if (const Marker* m = markerAt(pos)) {
+                // Clicking a marker lands exactly on it.
+                setPlayhead(m->time);
+                emit userSeeked(m_playhead, true);
+            } else {
+                seekTo(pos.x());
+            }
             e->accept();
             return;
         }
@@ -963,6 +1089,11 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
         return;
     }
     if (e->button() == Qt::RightButton) {
+        if (const Marker* m = markerAt(pos)) {
+            showMarkerMenu(e->globalPosition().toPoint(), m->id);
+            e->accept();
+            return;
+        }
         const Hit hit = hitTest(pos);
         if (isValid(hit.clip) && !isSelected(hit.clip)) selectClip(hit.clip, Qt::NoModifier);
         emit contextMenuRequested(e->globalPosition().toPoint(), hit.clip);
@@ -1193,6 +1324,9 @@ void TimelineView::finishGesture(bool commitEdit) {
 
 void TimelineView::mouseDoubleClickEvent(QMouseEvent* e) {
     const QPoint p = e->position().toPoint();
+    if (e->button() == Qt::LeftButton) {
+        if (const Marker* m = markerAt(p)) { renameMarker(m->id); return; }
+    }
     if (e->button() == Qt::LeftButton && p.x() < headerWidth() && p.y() >= rulerHeight() && !resizeHandleAt(p)) {
         if (const Lane* lane = laneAt(p.y())) {
             bool onButton = false;
@@ -1221,7 +1355,11 @@ bool TimelineView::event(QEvent* e) {
         auto* he = static_cast<QHelpEvent*>(e);
         const QPoint pos = he->pos();
         QString text;
-        if (pos.x() < headerWidth() && resizeHandleAt(pos)) {
+        if (const Marker* m = markerAt(pos)) {
+            text = QStringLiteral("<b>%1</b> · %2").arg(QString::fromStdString(m->name).toHtmlEscaped(), formatTimecode(m->time, m_fps));
+            if (!m->note.empty()) text += QStringLiteral("<br>") + QString::fromStdString(m->note).toHtmlEscaped();
+            text += tr("<br><i>Double-click to rename, right-click for colour and more</i>");
+        } else if (pos.x() < headerWidth() && resizeHandleAt(pos)) {
             text = tr("Drag to change the track height");
         } else if (pos.x() < headerWidth()) {
             if (const Lane* lane = laneAt(pos.y())) {
@@ -1529,6 +1667,7 @@ void TimelineView::paintEvent(QPaintEvent* e) {
         paintTracks(p, lanes, ticks);
         paintClips(p, lanes);
         paintTransitions(p);
+        paintMarkerLines(p);
         paintDropGhosts(p);
     }
     if (e->rect().intersects(ruler)) paintRuler(p, ruler, ticks);
@@ -1608,6 +1747,26 @@ void TimelineView::paintRuler(QPainter& p, const QRect& r, const TickSpec& ticks
                 const int mx = static_cast<int>(std::floor(xFromTicks(t + minor * i)));
                 p.drawLine(mx, r.bottom() - 4, mx, r.bottom());
             }
+        }
+    }
+    // Markers: a pennant on the ruler's lower edge, the name beside it when there is room.
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const auto& markers = m_doc.project().sequence.markers;
+    for (std::size_t i = 0; i < markers.size(); ++i) {
+        const auto& m = markers[i];
+        const double x = std::floor(xFromTicks(m.time.ticks)) + 0.5;
+        if (x < headerWidth() - 8 || x > width() + 8) continue;
+        const double y = r.bottom() - 11;
+        QPolygonF flag;
+        flag << QPointF(x - 5, y) << QPointF(x + 5, y) << QPointF(x + 5, y + 6) << QPointF(x, y + 11) << QPointF(x - 5, y + 6);
+        p.setPen(QPen(QColor(0, 0, 0, 120), 1));
+        p.setBrush(markerColor(m.color));
+        p.drawPolygon(flag);
+        const double nextX = i + 1 < markers.size() ? xFromTicks(markers[i + 1].time.ticks) : width();
+        const double room = nextX - x - 12;
+        if (room > 30) {
+            p.setPen(pal.textPrimary);
+            p.drawText(QRectF(x + 8, y - 1, room, 12), Qt::AlignLeft | Qt::AlignVCenter, p.fontMetrics().elidedText(QString::fromStdString(m.name), Qt::ElideRight, static_cast<int>(room)));
         }
     }
     p.restore();

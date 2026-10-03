@@ -17,6 +17,8 @@ cbuffer LayerConstants : register(b0) {
     float4   misc;        // vignetteAmount, texelW, texelH, crop feather (source pixels)
     float4   fx;          // grayscale mix, sepia mix, blur radius (texels), sharpen amount
     float4   fx2;         // invert mix, posterize levels, pixelate block (source pixels), unused
+    float4   mask0;       // centre x, centre y, half width, half height (uv)
+    float4   mask1;       // feather (fraction of the size), shape (0 none, 1 rect, 2 ellipse), invert
 };
 
 Texture2D tex0 : register(t0);
@@ -150,6 +152,13 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
 
     float opacity = adjust0.x;
     float a = alpha * opacity;
+    if (mask1.y > 0.0) {
+        // Shape mask in picture space; r = 1 on the shape's edge.
+        float2 d = abs(uv - mask0.xy) / mask0.zw;
+        float r = (mask1.y > 1.5) ? length(d) : max(d.x, d.y);
+        float inside = 1.0 - smoothstep(1.0 - mask1.x, 1.0 + 1e-4, r);
+        a *= (mask1.z > 0.5) ? 1.0 - inside : inside;
+    }
     if (misc.w > 0.0) {
         // Feathered crop: fade to transparent over misc.w source pixels inside each crop edge.
         float2 px = float2(1.0 / misc.y, 1.0 / misc.z);

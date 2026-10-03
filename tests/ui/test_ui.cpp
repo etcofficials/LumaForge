@@ -387,7 +387,8 @@ TEST_CASE("inspector tabs re-laid out when the selection changes kind (video -> 
         CHECK(tabs->tabRect(i).width() > 0);           // every offered tab is laid out
     }
     CHECK(names.contains(QStringLiteral("Text")) && names.contains(QStringLiteral("Effects")) && names.contains(QStringLiteral("Transform")));
-    CHECK(!names.contains(QStringLiteral("Audio")) && !names.contains(QStringLiteral("Video")));
+    CHECK(!names.contains(QStringLiteral("Audio")) && !names.contains(QStringLiteral("Speed")));
+    CHECK(names.contains(QStringLiteral("Video")));         // the Mask section lives there
 }
 
 TEST_CASE("keyframes from the inspector: diamond adds a key, edits at another time add more, undo removes") {
@@ -469,6 +470,51 @@ TEST_CASE("transitions: Ctrl+Shift+D adds a dissolve at the cut; inspector chang
     CHECK(!seq.findClip(bid)->transitionIn.has_value());
     press(Qt::Key_Y, Qt::ControlModifier);
     CHECK(seq.findClip(bid)->transitionIn.has_value());
+}
+
+TEST_CASE("markers (M, Shift+M, Ctrl+Shift+M, panel) and solid / adjustment clips") {
+    newProject();
+    focusTimeline();
+    const auto& seq = g_window->document().project().sequence;
+    press(Qt::Key_T, Qt::ControlModifier);                 // something to scroll over (0..5 s)
+    press(Qt::Key_M);                                      // marker at 0
+    timeline()->setPlayhead(TimePoint::fromSeconds(3));
+    press(Qt::Key_M);                                      // marker at 3 s
+    CHECK(seq.markers.size() == 2);
+    auto* list = g_window->findChild<QTreeWidget*>(QStringLiteral("markersList"));
+    CHECK(list && list->topLevelItemCount() == 2);
+    timeline()->setPlayhead(TimePoint::zero());
+    press(Qt::Key_M, Qt::ShiftModifier);                   // next marker
+    CHECK(timeline()->playhead() == TimePoint::fromSeconds(3));
+    press(Qt::Key_M, Qt::ControlModifier | Qt::ShiftModifier);   // previous marker
+    CHECK(timeline()->playhead() == TimePoint::zero());
+    press(Qt::Key_Z, Qt::ControlModifier);                 // undo the second marker
+    CHECK(seq.markers.size() == 1);
+    CHECK(list && list->topLevelItemCount() == 1);
+
+    timeline()->setPlayhead(TimePoint::zero());
+    act("timelineAddAdjustment")->trigger();
+    pump();
+    const project::Clip* adj = nullptr;
+    for (const auto& c : seq.clips) if (c.kind == project::ClipKind::Adjustment) adj = &c;
+    CHECK(adj != nullptr);
+    if (adj) {
+        // The title occupies the top track at 0..5 s, so the adjustment goes on the free one.
+        const project::Clip* title = nullptr;
+        for (const auto& c : seq.clips) if (c.kind == project::ClipKind::Text) title = &c;
+        CHECK(title && title->track != adj->track);
+    }
+    auto* tabs = g_window->findChild<QTabBar*>(QStringLiteral("inspectorTabs"));
+    QStringList names;
+    for (int i = 0; tabs && i < tabs->count(); ++i) names << tabs->tabText(i);
+    CHECK(!names.contains(QStringLiteral("Transform")));    // adjustment clips always cover the frame
+    CHECK(names.contains(QStringLiteral("Color")) && names.contains(QStringLiteral("Effects")));
+    CHECK(g_window->findChild<QWidget*>(QStringLiteral("adjustmentMix")) != nullptr);
+    act("timelineAddSolid")->trigger();
+    pump();
+    int solids = 0;
+    for (const auto& c : seq.clips) solids += c.kind == project::ClipKind::Solid;
+    CHECK(solids == 1);
 }
 
 int main(int argc, char** argv) {

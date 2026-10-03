@@ -17,7 +17,9 @@ class ColorSection final : public InspectorSection {
 public:
     explicit ColorSection(InspectorContext& ctx, QWidget* parent = nullptr);
 
-    [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return kind == project::ClipKind::Video || kind == project::ClipKind::Image; }
+    [[nodiscard]] bool appliesTo(project::ClipKind kind) const override {
+        return kind == project::ClipKind::Video || kind == project::ClipKind::Image || kind == project::ClipKind::Adjustment;
+    }
     [[nodiscard]] InspectorTab tab() const override { return InspectorTab::Color; }
     void load(const project::Clip& primary, int selectedCount) override;
 

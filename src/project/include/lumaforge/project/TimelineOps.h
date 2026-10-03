@@ -143,6 +143,17 @@ SequenceEdit addTransition(const Sequence& seq, const std::vector<ClipId>& ids, 
 // The transition currently at that edge (looking at the touching clip for the end), if any.
 [[nodiscard]] std::optional<Transition> transitionAt(const Sequence& seq, ClipId id, bool atStart);
 
+// ---- markers
+// Adds a marker at `time` (no-op when one is already there); the name defaults to "Marker N".
+SequenceEdit addMarker(const Sequence& seq, TimePoint time, std::string name = {});
+// Replaces the marker with the same id (time, name, colour, note); keeps the list sorted.
+SequenceEdit updateMarker(const Sequence& seq, const Marker& marker);
+SequenceEdit removeMarkers(const Sequence& seq, const std::vector<std::uint64_t>& ids);
+[[nodiscard]] std::optional<TimePoint> nextMarker(const Sequence& seq, TimePoint after);
+[[nodiscard]] std::optional<TimePoint> previousMarker(const Sequence& seq, TimePoint before);
+// "0:00 Intro" lines (YouTube chapter format), one per marker, in time order.
+[[nodiscard]] std::string chapterList(const Sequence& seq);
+
 // The sequence's clips as they will be once `edit` executes (for previews).
 std::vector<Clip> applied(const Sequence& seq, const SequenceEdit& edit);
 

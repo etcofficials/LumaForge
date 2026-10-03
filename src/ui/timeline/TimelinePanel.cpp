@@ -88,6 +88,9 @@ TimelinePanel::TimelinePanel(project::Document& doc, ActionRegistry& actions, QW
     actions.connect(ActionId::EditPasteOverwrite, this, [this] { m_view->pasteOverwrite(); });
     actions.connect(ActionId::EditDuplicate, this, [this] { m_view->duplicateSelection(); });
     actions.connect(ActionId::TimelineAddText, this, [this] { m_view->addTextClip(); });
+    actions.connect(ActionId::MarkerAdd, this, [this] { m_view->addMarker(); });
+    actions.connect(ActionId::TimelineAddSolid, this, [this] { m_view->addGeneratedClip(project::ClipKind::Solid); });
+    actions.connect(ActionId::TimelineAddAdjustment, this, [this] { m_view->addGeneratedClip(project::ClipKind::Adjustment); });
     actions.connect(ActionId::ClipAddTransition, this, [this] { m_view->addTransition(project::TransitionType::CrossDissolve, project::kDefaultTransitionDuration); });
     actions.connect(ActionId::ClipNudgeLeft, this, [this] { m_view->nudgeSelection(-1); });
     actions.connect(ActionId::ClipNudgeRight, this, [this] { m_view->nudgeSelection(1); });
@@ -293,6 +296,8 @@ void TimelinePanel::showContextMenu(const QPoint& globalPos, project::ClipId cli
     menu.addAction(m_actions.action(ActionId::TimelineAddVideoTrack));
     menu.addAction(m_actions.action(ActionId::TimelineAddAudioTrack));
     menu.addAction(m_actions.action(ActionId::TimelineAddText));
+    menu.addAction(m_actions.action(ActionId::TimelineAddSolid));
+    menu.addAction(m_actions.action(ActionId::TimelineAddAdjustment));
     menu.addSeparator();
     menu.addAction(m_actions.action(ActionId::ClipSelectAll));
     menu.addAction(m_actions.action(ActionId::ClipDeselect));

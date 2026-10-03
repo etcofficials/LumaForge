@@ -18,6 +18,8 @@ QString kindName(ClipKind k) {
         case ClipKind::Audio: return ClipInfoSection::tr("Audio");
         case ClipKind::Image: return ClipInfoSection::tr("Image");
         case ClipKind::Text: return ClipInfoSection::tr("Text");
+        case ClipKind::Solid: return ClipInfoSection::tr("Solid colour");
+        case ClipKind::Adjustment: return ClipInfoSection::tr("Adjustment");
     }
     return {};
 }
@@ -64,7 +66,7 @@ void ClipInfoSection::load(const Clip& c, int count) {
     const Track* track = project.sequence.findTrack(c.track);
     m_kind->setText(track ? QStringLiteral("%1  ·  %2").arg(kindName(c.kind), QString::fromStdString(track->name)) : kindName(c.kind));
     m_range->setText(QStringLiteral("%1 → %2\n%3").arg(formatTimecode(c.start, fps), formatTimecode(c.end(), fps), formatClock(c.duration)));
-    if (c.kind == ClipKind::Text) {
+    if (isGeneratedClip(c.kind)) {
         m_source->setText(tr("Generated"));
         m_media->setText(QString());
     } else {

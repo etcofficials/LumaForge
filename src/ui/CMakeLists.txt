@@ -23,11 +23,14 @@ qt_add_library(lf_ui STATIC
     inspector/AudioSection.h inspector/AudioSection.cpp
     inspector/KeyframeControls.h inspector/KeyframeControls.cpp
     inspector/TransitionSection.h inspector/TransitionSection.cpp
+    inspector/MaskSection.h inspector/MaskSection.cpp
+    inspector/GeneratedSections.h inspector/GeneratedSections.cpp
     widgets/ColorButton.h   widgets/ColorButton.cpp
     panels/MediaPanel.h     panels/MediaPanel.cpp
     panels/EffectsBrowserPanel.h panels/EffectsBrowserPanel.cpp
     panels/TitlesBrowserPanel.h panels/TitlesBrowserPanel.cpp
     panels/TransitionsBrowserPanel.h panels/TransitionsBrowserPanel.cpp
+    panels/MarkersPanel.h panels/MarkersPanel.cpp
     DragMime.h
     panels/InspectorPanel.h panels/InspectorPanel.cpp
     preview/PreviewWidget.h preview/PreviewWidget.cpp

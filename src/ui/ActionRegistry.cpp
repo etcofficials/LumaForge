@@ -147,6 +147,11 @@ const ActionDef kActions[] = {
     {ActionId::ClipProperties,  "clipProperties",  "P&roperties",          nullptr,       C::Clip, {}, {}, "Show the selected clip in the Inspector", false, false},
     {ActionId::ClipRevealInMedia, "clipRevealInMedia", "Reveal in &Media", nullptr,       C::Clip, {}, {}, "Select the clip's source file in the Media panel", false, false},
     {ActionId::ClipAddTransition, "clipAddTransition", "Add &Transition", "transition", C::Clip, Shortcut{CTRL | SHIFT | Qt::Key_D}, {}, "Add a 1 s cross dissolve at the selected clips' edge nearest the playhead", false, false},
+    {ActionId::TimelineAddSolid, "timelineAddSolid", "Add &Solid Colour", nullptr, C::Timeline, {}, {}, "Add a 5 s full-frame colour clip at the playhead on a free video track"},
+    {ActionId::TimelineAddAdjustment, "timelineAddAdjustment", "Add &Adjustment Clip", nullptr, C::Timeline, {}, {}, "Add a 5 s adjustment clip: its colour, effects and mask apply to everything below"},
+    {ActionId::MarkerAdd, "markerAdd", "Add &Marker", "marker", C::Timeline, Shortcut{Qt::Key_M}, {}, "Add a marker at the playhead"},
+    {ActionId::MarkerNext, "markerNext", "Next Mar&ker", nullptr, C::Playback, Shortcut{SHIFT | Qt::Key_M}, {}, "Move the playhead to the next marker"},
+    {ActionId::MarkerPrevious, "markerPrevious", "Previous Marke&r", nullptr, C::Playback, Shortcut{CTRL | SHIFT | Qt::Key_M}, {}, "Move the playhead to the previous marker"},
     {ActionId::TimelineAddText, "timelineAddText", "Add &Text",            "text",        C::Text, Shortcut{CTRL | Qt::Key_T}, {}, "Add a text clip at the playhead on the top video track"},
 
     // ---- Viewer

@@ -184,3 +184,64 @@ TEST_CASE("compositor: WARP device renders identically to hardware for a solid l
     Px p = pixel(out, 32, 16, 16);
     CHECK(p.r == 255 && p.g == 255 && p.b == 255);
 }
+
+TEST_CASE("compositor: ellipse mask (with invert), pixelate/posterize/invert, adjustment layer") {
+    auto gpu = hw::GpuDevice::create({});
+    if (!gpu) return;
+    auto comp = Compositor::create(*gpu);
+    if (!comp) return;
+    auto red = (*comp)->texturePool().acquireBgra(64, 64, true);
+    if (!red) return;
+    std::vector<std::uint8_t> px(64 * 64 * 4);
+    for (std::size_t i = 0; i < px.size(); i += 4) { px[i] = 0; px[i + 1] = 0; px[i + 2] = 200; px[i + 3] = 255; }
+    (*red)->fillBgra(px.data(), 64 * 4, false);
+    auto target = (*comp)->createTarget(64, 64);
+    if (!target) return;
+    std::vector<std::uint8_t> out;
+
+    Layer masked;
+    masked.texture = *red;
+    masked.mask.shape = MaskShape::Ellipse;
+    masked.mask.width = masked.mask.height = 0.5f;
+    masked.mask.feather = 0.0f;
+    Layer l1[] = {masked};
+    (*comp)->compose(**target, 64, 64, l1, Rgba{0, 0, 0, 1});
+    (*comp)->readback(**target, out);
+    CHECK(pixel(out, 64, 32, 32).r > 190);   // centre: inside
+    CHECK(pixel(out, 64, 2, 2).r < 5);       // corner: outside
+    masked.mask.invert = true;
+    Layer l2[] = {masked};
+    (*comp)->compose(**target, 64, 64, l2, Rgba{0, 0, 0, 1});
+    (*comp)->readback(**target, out);
+    CHECK(pixel(out, 64, 32, 32).r < 5 && pixel(out, 64, 2, 2).r > 190);
+
+    // Invert effect: 200 -> 55.
+    Layer inv;
+    inv.texture = *red;
+    inv.effects.invert = 1.0f;
+    Layer l3[] = {inv};
+    (*comp)->compose(**target, 64, 64, l3, Rgba{0, 0, 0, 1});
+    (*comp)->readback(**target, out);
+    Px p = pixel(out, 64, 32, 32);
+    CHECK(std::abs(p.r - 55) <= 3 && std::abs(p.g - 255) <= 3);
+
+    // Adjustment layer: the red picture below goes grey; a masked adjustment only inside its ellipse.
+    Layer base;
+    base.texture = *red;
+    Layer adj;
+    adj.adjustment = true;
+    adj.effects.grayscale = 1.0f;
+    Layer l4[] = {base, adj};
+    (*comp)->compose(**target, 64, 64, l4, Rgba{0, 0, 0, 1});
+    (*comp)->readback(**target, out);
+    p = pixel(out, 64, 32, 32);
+    const int grey = static_cast<int>(std::lround(0.2126 * 200));
+    CHECK(std::abs(p.r - grey) <= 3 && std::abs(p.g - grey) <= 3 && std::abs(p.b - grey) <= 3);
+    adj.mask.shape = MaskShape::Ellipse;
+    adj.mask.feather = 0.0f;
+    Layer l5[] = {base, adj};
+    (*comp)->compose(**target, 64, 64, l5, Rgba{0, 0, 0, 1});
+    (*comp)->readback(**target, out);
+    CHECK(std::abs(pixel(out, 64, 32, 32).r - grey) <= 3);   // inside: adjusted
+    CHECK(pixel(out, 64, 2, 2).r > 190);                       // outside: untouched red
+}

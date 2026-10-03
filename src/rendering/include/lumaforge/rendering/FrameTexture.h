@@ -31,6 +31,8 @@ public:
     // Shader resource views in plane order (Y,UV | Y,U,V | RGBA).
     [[nodiscard]] ID3D11ShaderResourceView* const* views() const noexcept { return m_viewPtrs; }
     [[nodiscard]] int viewCount() const noexcept { return m_viewCount; }
+    // The texture of one plane (copy targets for adjustment layers).
+    [[nodiscard]] ID3D11Texture2D* plane(int i) const noexcept { return (i >= 0 && i < 3) ? m_tex[i].Get() : nullptr; }
 
     // Fill from a decoded frame: GPU copy for D3D11 frames, upload for CPU
     // frames. Takes the device context lock internally.

@@ -29,7 +29,7 @@ std::function<void(Clip&)> cropConstraint(float Crop::*member) {
 }
 // Picture size of a visual clip in source pixels (display orientation).
 bool sourceSize(const Project& p, const Clip& c, double& w, double& h) {
-    if (c.kind == ClipKind::Text) { w = p.settings.width; h = p.settings.height; return true; }
+    if (isGeneratedClip(c.kind)) { w = p.settings.width; h = p.settings.height; return true; }
     const MediaItem* m = p.findMedia(c.media);
     if (!m || !m->info.video || m->info.video->width <= 0 || m->info.video->height <= 0) return false;
     w = m->info.video->width;

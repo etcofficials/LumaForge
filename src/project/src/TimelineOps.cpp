@@ -1,6 +1,7 @@
 #include "lumaforge/project/TimelineOps.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <map>
@@ -223,7 +224,7 @@ std::optional<SequenceEdit> moveClips(Document& doc, const std::vector<ClipId>& 
 // ---------------------------------------------------------------- trim
 
 std::optional<Duration> mediaDuration(const Project& project, const Clip& clip) {
-    if (clip.kind == ClipKind::Text || clip.kind == ClipKind::Image) return std::nullopt;
+    if (isGeneratedClip(clip.kind) || clip.kind == ClipKind::Image) return std::nullopt;
     const MediaItem* item = project.findMedia(clip.media);
     if (!item || item->info.duration.ticks <= 0) return std::nullopt;
     return item->info.duration;
@@ -386,7 +387,7 @@ SequenceEdit pasteClips(Document& doc, const std::vector<Clip>& source, TimePoin
     for (const Clip& c : source) {
         const Track* t = seq.findTrack(c.track);
         if (!t || t->locked) continue;
-        if (c.kind != ClipKind::Text && !doc.project().findMedia(c.media)) continue;
+        if (!isGeneratedClip(c.kind) && !doc.project().findMedia(c.media)) continue;
         valid.push_back(c);
     }
     if (valid.empty()) return {};
@@ -864,6 +865,85 @@ std::optional<Transition> transitionAt(const Sequence& seq, ClipId id, bool atSt
     return inSide ? owner->transitionIn : owner->transitionOut;
 }
 
+// ---------------------------------------------------------------- markers
+
+namespace {
+void sortMarkers(std::vector<Marker>& m) {
+    std::stable_sort(m.begin(), m.end(), [](const Marker& a, const Marker& b) { return a.time < b.time; });
+}
+}  // namespace
+
+SequenceEdit addMarker(const Sequence& seq, TimePoint time, std::string name) {
+    SequenceEdit edit;
+    for (const auto& m : seq.markers) if (m.time == time) return edit;
+    std::uint64_t id = 1;
+    for (const auto& m : seq.markers) id = std::max(id, m.id + 1);
+    Marker marker;
+    marker.id = id;
+    marker.time = TimePoint{std::max<Ticks>(0, time.ticks)};
+    marker.name = name.empty() ? "Marker " + std::to_string(seq.markers.size() + 1) : std::move(name);
+    auto list = seq.markers;
+    list.push_back(std::move(marker));
+    sortMarkers(list);
+    edit.markers = std::move(list);
+    return edit;
+}
+
+SequenceEdit updateMarker(const Sequence& seq, const Marker& marker) {
+    SequenceEdit edit;
+    auto list = seq.markers;
+    bool changed = false;
+    for (auto& m : list) {
+        if (m.id != marker.id) continue;
+        Marker n = marker;
+        n.time = TimePoint{std::max<Ticks>(0, n.time.ticks)};
+        changed = !(m == n);
+        m = n;
+    }
+    if (!changed) return edit;
+    sortMarkers(list);
+    edit.markers = std::move(list);
+    return edit;
+}
+
+SequenceEdit removeMarkers(const Sequence& seq, const std::vector<std::uint64_t>& ids) {
+    SequenceEdit edit;
+    auto list = seq.markers;
+    const auto before = list.size();
+    std::erase_if(list, [&](const Marker& m) { return std::find(ids.begin(), ids.end(), m.id) != ids.end(); });
+    if (list.size() != before) edit.markers = std::move(list);
+    return edit;
+}
+
+std::optional<TimePoint> nextMarker(const Sequence& seq, TimePoint after) {
+    for (const auto& m : seq.markers) if (m.time > after) return m.time;
+    return std::nullopt;
+}
+
+std::optional<TimePoint> previousMarker(const Sequence& seq, TimePoint before) {
+    std::optional<TimePoint> best;
+    for (const auto& m : seq.markers) if (m.time < before) best = m.time;
+    return best;
+}
+
+std::string chapterList(const Sequence& seq) {
+    std::string out;
+    bool hours = false;
+    for (const auto& m : seq.markers) hours |= m.time.ticks >= 3600 * kFlicksPerSecond;
+    for (const auto& m : seq.markers) {
+        const std::int64_t total = m.time.ticks / kFlicksPerSecond;
+        const std::int64_t h = total / 3600, mi = (total / 60) % 60, s = total % 60;
+        char buf[32];
+        if (hours) std::snprintf(buf, sizeof buf, "%lld:%02lld:%02lld", static_cast<long long>(h), static_cast<long long>(mi), static_cast<long long>(s));
+        else std::snprintf(buf, sizeof buf, "%lld:%02lld", static_cast<long long>(total / 60), static_cast<long long>(s));
+        out += buf;
+        out += ' ';
+        out += m.name;
+        out += '\n';
+    }
+    return out;
+}
+
 std::vector<Clip> applied(const Sequence& seq, const SequenceEdit& edit) { return effectiveClips(seq, edit); }
 
 std::vector<ClipId> withLinked(const Sequence& seq, const std::vector<ClipId>& ids) {
@@ -883,6 +963,7 @@ std::vector<TimePoint> snapTargets(const Sequence& seq, const std::vector<ClipId
         t.push_back(c.start);
         t.push_back(c.end());
     }
+    for (const auto& m : seq.markers) t.push_back(m.time);
     std::sort(t.begin(), t.end());
     t.erase(std::unique(t.begin(), t.end()), t.end());
     return t;

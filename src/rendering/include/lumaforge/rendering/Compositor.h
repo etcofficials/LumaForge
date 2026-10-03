@@ -22,11 +22,15 @@ struct Layer {
     std::shared_ptr<FrameTexture> texture;
     Transform2D transform;
     Crop crop;
+    Mask mask;
     ColorAdjust color;
     EffectParams effects;
     // Scale-to-fit is the default for media; text/images already in frame
     // pixels set this false so 1 texel = 1 frame pixel at scale 1.
     bool fitToFrame = true;
+    // Adjustment layer (no texture): what has been composited so far is
+    // redrawn through this layer's colour, effects, mask, crop and opacity.
+    bool adjustment = false;
 };
 
 // Offscreen frame buffer (BGRA8) the composition renders into. Sized to the

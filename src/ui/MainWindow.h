@@ -41,6 +41,7 @@ class ProjectInfoPanel;
 class TimelinePanel;
 class TitlesBrowserPanel;
 class TransitionsBrowserPanel;
+class MarkersPanel;
 class ToastHost;
 class WorkspaceManager;
 enum class Workspace;
@@ -141,6 +142,7 @@ private:
     EffectsBrowserPanel* m_effectsBrowser = nullptr;
     TitlesBrowserPanel* m_titlesBrowser = nullptr;
     TransitionsBrowserPanel* m_transitionsBrowser = nullptr;
+    MarkersPanel* m_markersPanel = nullptr;
     PreviewPanel* m_previewPanel = nullptr;
     InspectorPanel* m_inspectorPanel = nullptr;
     TimelinePanel* m_timelinePanel = nullptr;
