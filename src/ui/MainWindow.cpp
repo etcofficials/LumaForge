@@ -30,6 +30,7 @@
 #include "ui/panels/TransitionsBrowserPanel.h"
 #include "ui/panels/MarkersPanel.h"
 #include "ui/panels/MixerPanel.h"
+#include "ui/panels/ScopesPanel.h"
 #include "ui/export/ExportController.h"
 #include "ui/export/ExportQueuePanel.h"
 #include "ui/export/ExportSettingsPanel.h"
@@ -410,6 +411,7 @@ void MainWindow::buildPanels() {
     m_transitionsBrowser = new TransitionsBrowserPanel(this);
     m_markersPanel = new MarkersPanel(*m_document, *m_actions, this);
     m_mixerPanel = new MixerPanel(*m_document, *m_playback, this);
+    m_scopesPanel = new ScopesPanel(*m_playback, this);
     m_exportController = new ExportController(m_gpu, this);
     m_exportSettings = new ExportSettingsPanel(*m_document, *m_exportController, this);
     m_exportQueue = new ExportQueuePanel(*m_exportController, this);
@@ -435,6 +437,8 @@ void MainWindow::buildPanels() {
     auto* exportQueueDock = makeDock(tr("Render Queue"), QStringLiteral("exportQueueDock"), m_exportQueue, nullptr);
     auto* mixerDock = makeDock(tr("Mixer"), QStringLiteral("mixerDock"), m_mixerPanel, nullptr);
     m_workspaces->registerDock(DockId::Mixer, mixerDock);
+    auto* scopesDock = makeDock(tr("Scopes"), QStringLiteral("scopesDock"), m_scopesPanel, nullptr);
+    m_workspaces->registerDock(DockId::Scopes, scopesDock);
     m_workspaces->registerDock(DockId::ExportSettings, exportSettingsDock);
     m_workspaces->registerDock(DockId::ExportQueue, exportQueueDock);
     m_workspaces->setAvailable(Workspace::Export, true);

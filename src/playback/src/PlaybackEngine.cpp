@@ -410,6 +410,7 @@ void PlaybackEngine::renderOnce(TimePoint t, bool vsync) {
         LF_LOG_WARN(kLog, "compose failed: {}", s.error().fullText());
         return;
     }
+    deliverTap();
     render::IntRect dst = render::fitFrame(m_surface->width(), m_surface->height(), fw, fh);
     if (m_viewZoom > 0.0) {
         // Magnified: frame pixels map to screen pixels by the zoom, centred plus pan;
@@ -437,6 +438,52 @@ void PlaybackEngine::renderOnce(TimePoint t, bool vsync) {
         std::lock_guard lock(m_mutex);
         m_retryRender = starved;
     }
+}
+
+void PlaybackEngine::setFrameTap(std::function<void(const media::Image&)> tap, int maxWidth) {
+    {
+        std::lock_guard lock(m_mutex);
+        m_frameTap = std::move(tap);
+        m_tapWidth = std::max(32, maxWidth);
+        m_lastTap = {};
+    }
+    requestRedraw();
+}
+
+void PlaybackEngine::deliverTap() {
+    std::function<void(const media::Image&)> tap;
+    int maxWidth = 320;
+    {
+        std::lock_guard lock(m_mutex);
+        if (!m_frameTap) return;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - m_lastTap < std::chrono::milliseconds(100)) return;
+        m_lastTap = now;
+        tap = m_frameTap;
+        maxWidth = m_tapWidth;
+    }
+    if (!m_compositor->readback(*m_target, m_tapBuffer)) return;
+    const int sw = m_target->width(), sh = m_target->height();
+    // Box-reduce to the tap size (scopes need distribution, not detail).
+    const int step = std::max(1, (sw + maxWidth - 1) / maxWidth);
+    media::Image img;
+    img.width = sw / step;
+    img.height = sh / step;
+    if (img.width <= 0 || img.height <= 0) return;
+    img.bgra.resize(static_cast<std::size_t>(img.width) * img.height * 4);
+    for (int y = 0; y < img.height; ++y) {
+        for (int x = 0; x < img.width; ++x) {
+            unsigned acc[4] = {0, 0, 0, 0};
+            for (int dy = 0; dy < step; ++dy)
+                for (int dx = 0; dx < step; ++dx) {
+                    const std::uint8_t* p = &m_tapBuffer[(static_cast<std::size_t>(y * step + dy) * sw + (x * step + dx)) * 4];
+                    for (int c = 0; c < 4; ++c) acc[c] += p[c];
+                }
+            std::uint8_t* d = &img.bgra[(static_cast<std::size_t>(y) * img.width + x) * 4];
+            for (int c = 0; c < 4; ++c) d[c] = static_cast<std::uint8_t>(acc[c] / (step * step));
+        }
+    }
+    tap(img);
 }
 
 void PlaybackEngine::threadMain() {

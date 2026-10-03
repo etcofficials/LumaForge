@@ -5,6 +5,7 @@
 #include "lumaforge/playback/Program.h"
 #include "lumaforge/rendering/Compositor.h"
 #include "lumaforge/rendering/PreviewRenderer.h"
+#include "lumaforge/media/Image.h"
 #include "lumaforge/playback/AudioMixer.h"
 #include "lumaforge/playback/LayerFactory.h"
 #include "lumaforge/rendering/TextRasterizer.h"
@@ -95,6 +96,11 @@ public:
     [[nodiscard]] PlaybackStats stats() const;
     [[nodiscard]] render::Compositor& compositor() noexcept { return *m_compositor; }
     [[nodiscard]] bool audioAvailable() const noexcept { return m_audio != nullptr; }
+    // Frame tap for scopes: after rendering, at most ~10 times a second, the
+    // composited frame is read back, reduced to at most maxWidth pixels wide
+    // and passed to `tap` on the engine thread. An empty function turns it off.
+    void setFrameTap(std::function<void(const media::Image&)> tap, int maxWidth = 320);
+
     // Peak levels of the preview mix since the last call (meters).
     [[nodiscard]] AudioMixer::Levels takeAudioLevels() { return m_mixer ? m_mixer->takeLevels() : AudioMixer::Levels{}; }
 
@@ -137,7 +143,12 @@ private:
         std::chrono::steady_clock::time_point lastUsed;
     };
     std::unordered_map<std::string, ReaderEntry> m_readers;
-    std::unique_ptr<LayerFactory> m_layerFactory;   // generated layers (text, solid, adjustment); render thread only
+    std::unique_ptr<LayerFactory> m_layerFactory;
+    std::function<void(const media::Image&)> m_frameTap;   // guarded by m_mutex
+    int m_tapWidth = 320;
+    std::chrono::steady_clock::time_point m_lastTap{};
+    std::vector<std::uint8_t> m_tapBuffer;
+    void deliverTap();   // generated layers (text, solid, adjustment); render thread only
     std::vector<VideoLayerRequest> m_layerRequests;
     std::vector<VideoLayerRequest> m_prerollRequests;
     std::vector<render::Layer> m_layers;

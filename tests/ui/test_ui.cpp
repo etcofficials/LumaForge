@@ -15,6 +15,7 @@
 #include "ui/inspector/KeyframeControls.h"
 #include "ui/widgets/ParamSlider.h"
 #include "ui/panels/MediaPanel.h"
+#include "ui/panels/ScopesPanel.h"
 #include "ui/timeline/TimelineView.h"
 
 #include <QAction>
@@ -561,6 +562,40 @@ TEST_CASE("export: Ctrl+M opens the Export workspace; the panel queues a render 
     if (job && job->state != ExportJob::State::Done) std::printf("    export message: %s\n", qPrintable(job->message));
     CHECK(QFileInfo(out).size() > 1000);
     CHECK(job && job->result.frames == 30 && job->result.height == 360);
+}
+
+TEST_CASE("scopes: waveform, parade and vectorscope place known colours where they belong") {
+    auto solid = [](int r, int g, int b) {
+        media::Image img;
+        img.width = 64;
+        img.height = 36;
+        img.bgra.resize(64 * 36 * 4);
+        for (std::size_t i = 0; i < img.bgra.size(); i += 4) { img.bgra[i] = static_cast<std::uint8_t>(b); img.bgra[i + 1] = static_cast<std::uint8_t>(g); img.bgra[i + 2] = static_cast<std::uint8_t>(r); img.bgra[i + 3] = 255; }
+        return img;
+    };
+    auto brightestRow = [](const QImage& img) {
+        int best = -1, bestSum = -1;
+        for (int y = 0; y < img.height(); ++y) {
+            int sum = 0;
+            for (int x = 0; x < img.width(); ++x) sum += qGreen(img.pixel(x, y));
+            if (sum > bestSum) { bestSum = sum; best = y; }
+        }
+        return best;
+    };
+    // Mid grey (128): the waveform trace sits on the 50 % line.
+    const QImage wf = scopes::render(scopes::Mode::Waveform, solid(128, 128, 128), 200, 101);
+    CHECK(std::abs(brightestRow(wf) - 50) <= 1);
+    CHECK(scopes::luma(solid(255, 255, 255).bgra.data()) >= 254 && scopes::luma(solid(0, 0, 0).bgra.data()) == 0);
+    // Pure red: in the vectorscope the hits are up and to the left of centre (Cr high, Cb low).
+    const QImage vs = scopes::render(scopes::Mode::Vectorscope, solid(255, 0, 0), 200, 200);
+    int hx = -1, hy = -1, best = -1;
+    for (int y = 0; y < vs.height(); ++y)
+        for (int x = 0; x < vs.width(); ++x) if (qRed(vs.pixel(x, y)) > best) { best = qRed(vs.pixel(x, y)); hx = x; hy = y; }
+    CHECK(best > 100 && hx < 100 && hy < 60);
+    // Parade: a blue frame lights only the right third near the top.
+    const QImage parade = scopes::render(scopes::Mode::Parade, solid(0, 0, 255), 300, 101);
+    CHECK(qBlue(parade.pixel(250, 0)) > 100 && qRed(parade.pixel(50, 0)) < 40);
+    CHECK(!scopes::render(scopes::Mode::Histogram, solid(10, 200, 30), 256, 100).isNull());
 }
 
 int main(int argc, char** argv) {
