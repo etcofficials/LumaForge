@@ -196,12 +196,13 @@ TEST_CASE("project v3 round-trips clip enable and In/Out; v2 files still load") 
     const std::string json = serializer::toJson(p, "");
     auto loaded = serializer::fromJson(json, "");
     CHECK(static_cast<bool>(loaded));
-    CHECK(loaded->fileVersion == 3);
+    CHECK(loaded->fileVersion == serializer::kFormatVersion);
     CHECK(!loaded->project.sequence.findClip(a)->enabled);
     CHECK(loaded->project.sequence.markIn == sec(1) && loaded->project.sequence.markOut == sec(3));
     // An older file has neither key: defaults apply.
     std::string v2 = json;
-    v2.replace(v2.find("\"version\": 3"), 12, "\"version\": 2");
+    const std::string current = "\"version\": " + std::to_string(serializer::kFormatVersion);
+    v2.replace(v2.find(current), current.size(), "\"version\": 2");
     auto old = serializer::fromJson(v2, "");
     CHECK(static_cast<bool>(old) && old->fileVersion == 2);
 }

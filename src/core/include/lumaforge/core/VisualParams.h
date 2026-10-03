@@ -59,7 +59,15 @@ struct ColorAdjust {
 // rendering the list is flattened (applyEffects) into the ColorAdjust the
 // shader already understands plus EffectParams for the looks/filters, so
 // adding an effect type never touches the compositor's interface.
-enum class EffectType { Brightness, Contrast, Saturation, Grayscale, Sepia, Blur, Sharpen, Vignette, Count };
+// New types are appended so the enum stays in step with older builds; project
+// files store the string id, never the number.
+enum class EffectType {
+    Brightness, Contrast, Saturation, Grayscale, Sepia, Blur, Sharpen, Vignette,
+    Exposure, Temperature, Tint, HueShift, Vibrance, Invert, Posterize, Pixelate,
+    Count
+};
+
+enum class EffectCategory { Color, BlurSharpen, Stylize };
 
 struct EffectInfo {
     const char* id;        // stable key in project files
@@ -67,7 +75,10 @@ struct EffectInfo {
     float min, max, def;   // amount range and default
     int decimals;
     const char* suffix;
+    EffectCategory category;
+    const char* description;   // one line for tooltips and the effects browser
 };
+[[nodiscard]] const char* effectCategoryName(EffectCategory category) noexcept;
 [[nodiscard]] const EffectInfo& effectInfo(EffectType type) noexcept;
 // Type for a project-file id; nullopt-like sentinel is EffectType::Count.
 [[nodiscard]] EffectType effectTypeFromId(const std::string& id) noexcept;
@@ -87,7 +98,13 @@ struct EffectParams {
     float vignette = 0.0f;    // 0..1
     float blur = 0.0f;        // radius in source pixels, 0 = off
     float sharpen = 0.0f;     // 0..1
-    [[nodiscard]] constexpr bool isIdentity() const noexcept { return grayscale == 0.0f && sepia == 0.0f && vignette == 0.0f && blur == 0.0f && sharpen == 0.0f; }
+    float invert = 0.0f;      // 0..1 mix
+    float posterize = 0.0f;   // levels per channel, 0 = off
+    float pixelate = 0.0f;    // block size in source pixels, 0 = off
+    [[nodiscard]] constexpr bool isIdentity() const noexcept {
+        return grayscale == 0.0f && sepia == 0.0f && vignette == 0.0f && blur == 0.0f && sharpen == 0.0f && invert == 0.0f && posterize == 0.0f &&
+               pixelate == 0.0f;
+    }
     friend constexpr bool operator==(const EffectParams&, const EffectParams&) = default;
 };
 

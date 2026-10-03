@@ -12,9 +12,11 @@ cbuffer LayerConstants : register(b0) {
     float4   adjust2;     // shadows, gamma, vibrance, hue
     int4     mode;        // x: 0 = NV12 (t0=Y R8, t1=UV RG8), 1 = I420 (t0,t1,t2 R8), 2 = BGRA (t0)
                           // y: flags  1 grayscale, 2 sepia, 4 vignette, 8 input premultiplied, 16 skip colour math,
-                          //           32 blur, 64 sharpen        z: 1 flip H, 2 flip V
+                          //           32 blur, 64 sharpen, 128 invert, 256 posterize, 512 pixelate
+                          //        z: 1 flip H, 2 flip V
     float4   misc;        // vignetteAmount, texelW, texelH, crop feather (source pixels)
     float4   fx;          // grayscale mix, sepia mix, blur radius (texels), sharpen amount
+    float4   fx2;         // invert mix, posterize levels, pixelate block (source pixels), unused
 };
 
 Texture2D tex0 : register(t0);
@@ -77,6 +79,11 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
     if (uv.x < uvRect.x || uv.x > uvRect.z || uv.y < uvRect.y || uv.y > uvRect.w) return float4(0, 0, 0, 0);
 
     int flags = mode.y;
+    if (flags & 512) {
+        // Pixelate: every pixel of a block samples the block centre (blocks anchored at the crop corner).
+        float2 block = fx2.z * misc.yz;
+        uv = clamp(uvRect.xy + (floor((uv - uvRect.xy) / block) + 0.5) * block, uvRect.xy, uvRect.zw);
+    }
     float4 src = (flags & 32) ? blurred(uv, fx.z) : sampleSource(uv);
     float3 rgb = src.rgb;
     float alpha = src.a;
@@ -128,6 +135,11 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
         if (flags & 2) {
             float3 s = float3(dot(rgb, float3(0.393, 0.769, 0.189)), dot(rgb, float3(0.349, 0.686, 0.168)), dot(rgb, float3(0.272, 0.534, 0.131)));
             rgb = lerp(rgb, saturate(s), fx.y);
+        }
+        if (flags & 128) rgb = lerp(rgb, 1.0 - rgb, fx2.x);
+        if (flags & 256) {
+            float levels = max(fx2.y - 1.0, 1.0);
+            rgb = floor(rgb * levels + 0.5) / levels;
         }
         if (flags & 4) {
             float2 d = (uv - 0.5) * 2.0;

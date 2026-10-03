@@ -23,6 +23,7 @@ struct ProjectSettings {
 struct Project {
     ProjectSettings settings;
     std::vector<MediaItem> media;
+    std::vector<std::string> bins;   // media panel folders, in display order
     Sequence sequence = Sequence::withDefaultTracks();
 
     [[nodiscard]] const MediaItem* findMedia(MediaId id) const noexcept {

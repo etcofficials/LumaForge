@@ -96,8 +96,10 @@ public slots:
     void paste();              // insert at the playhead (later clips move right)
     void pasteOverwrite();     // at the playhead, replacing what is underneath
     void duplicateSelection();
-    void addTextClip();        // 5 s title at the playhead on the top video track
-    void addTextClipAt(lf::project::TrackId track, lf::TimePoint at);
+    void addTextClip(int preset = 0);   // 5 s title at the playhead on the top video track
+    void addTextClipAt(lf::project::TrackId track, lf::TimePoint at, int preset = 0);
+    // Appends an effect to the given clips (visual, unlocked); returns how many changed.
+    int addEffect(const std::vector<lf::project::ClipId>& ids, lf::EffectType type);
     void nudgeSelection(int frames);
     void moveSelectionToPlayhead();
     void trimSelectionToPlayhead(bool start);
@@ -284,6 +286,9 @@ private:
     std::vector<DropGhost> m_dropGhosts;
     std::vector<project::Clip> m_dropClips;   // pre-built clips with ids, repositioned on drag move
     bool m_dropIsFiles = false;
+    EffectType m_dropEffect = EffectType::Count;          // effect being dragged from the browser
+    project::ClipId m_dropEffectTarget = project::ClipId::Invalid;
+    [[nodiscard]] std::vector<project::ClipId> effectTargets(project::ClipId under) const;
     TimePoint m_dropTime;
 };
 

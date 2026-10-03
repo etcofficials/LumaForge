@@ -20,9 +20,11 @@
 #include "ui/home/HomeScreen.h"
 #include "ui/media/ImportController.h"
 #include "ui/panels/BrowserPanel.h"
+#include "ui/panels/EffectsBrowserPanel.h"
 #include "ui/panels/InspectorPanel.h"
 #include "ui/panels/MediaPanel.h"
 #include "ui/panels/ProjectInfoPanel.h"
+#include "ui/panels/TitlesBrowserPanel.h"
 #include "ui/playback/PlaybackController.h"
 #include "ui/preview/PreviewPanel.h"
 #include "ui/preview/PreviewWidget.h"
@@ -383,9 +385,13 @@ void MainWindow::buildPanels() {
     m_inspectorPanel = new InspectorPanel(*m_document, this);
     m_timelinePanel = new TimelinePanel(*m_document, *m_actions, this);
     m_projectInfo = new ProjectInfoPanel(*m_document, *m_actions, this);
+    m_effectsBrowser = new EffectsBrowserPanel(this);
+    m_titlesBrowser = new TitlesBrowserPanel(this);
 
     m_browser = new BrowserPanel(this);
     m_browser->addPage(m_mediaPanel, tr("Media"), QStringLiteral("media"), tr("Imported media and bins"));
+    m_browser->addPage(m_effectsBrowser, tr("Effects"), QStringLiteral("effects"), tr("Clip effects: drag onto a clip or apply to the selection"));
+    m_browser->addPage(m_titlesBrowser, tr("Titles"), QStringLiteral("titles"), tr("Title presets: drag onto the timeline or add at the playhead"));
     m_browser->addPage(m_projectInfo, tr("Project"), QStringLiteral("project"), tr("Project information and data locations"));
 
     m_editor->setCentralWidget(m_previewPanel);
@@ -503,7 +509,20 @@ void MainWindow::connectActions() {
         if (m_playback->mode() != PlaybackController::Mode::Sequence) showSequenceInPreview(t);
         m_playback->seek(t, scrubbing);
     });
+    connect(m_effectsBrowser, &EffectsBrowserPanel::applyRequested, this, [this](EffectType type) {
+        auto* view = m_timelinePanel->view();
+        if (view->addEffect(view->selection(), type) == 0) {
+            m_toasts->show(tr("Select a video, image or title clip on an unlocked track first."), ToastHost::Kind::Warning);
+            return;
+        }
+        m_inspectorPanel->revealSection(QStringLiteral("effects"));
+    });
+    connect(m_titlesBrowser, &TitlesBrowserPanel::addRequested, this, [this](int preset) {
+        m_timelinePanel->view()->addTextClip(preset);
+        m_timelinePanel->view()->setFocus(Qt::OtherFocusReason);
+    });
     connect(tl, &TimelineView::selectionChanged, this, [this] {
+        m_effectsBrowser->setCanApply(m_timelinePanel->view()->selectionHasVisual());
         m_inspectorPanel->setSelection(m_timelinePanel->view()->selection());
         if (m_playback->mode() == PlaybackController::Mode::Source && m_timelinePanel->view()->hasSelection()) showSequenceInPreview(m_timelinePanel->view()->playhead());
     });
@@ -705,8 +724,8 @@ void MainWindow::onWorkspaceChanged(Workspace w) {
         case Workspace::Edit: m_browser->showPage(QStringLiteral("media")); break;
         case Workspace::Color: m_inspectorPanel->showTab(InspectorTab::Color); break;
         case Workspace::Audio: m_inspectorPanel->showTab(InspectorTab::Audio); break;
-        case Workspace::Text: m_inspectorPanel->showTab(InspectorTab::Text); break;
-        case Workspace::Effects: m_inspectorPanel->showTab(InspectorTab::Effects); break;
+        case Workspace::Text: m_browser->showPage(QStringLiteral("titles")); m_inspectorPanel->showTab(InspectorTab::Text); break;
+        case Workspace::Effects: m_browser->showPage(QStringLiteral("effects")); m_inspectorPanel->showTab(InspectorTab::Effects); break;
         default: break;
     }
 }

@@ -13,7 +13,8 @@ namespace lf::project {
 struct MediaItem {
     MediaId id = MediaId::Invalid;
     std::string path;            // absolute, UTF-8
-    std::string displayName;     // defaults to the file name; user-renamable later
+    std::string displayName;     // defaults to the file name; user-renamable
+    std::string bin;             // bin (folder) name in the media panel, empty = unsorted
     media::MediaInfo info;       // probe result at import time (refreshed on relink)
     std::uint64_t fingerprintSize = 0;    // file size at import, for relinking
     std::int64_t fingerprintMtime = 0;    // modification time at import

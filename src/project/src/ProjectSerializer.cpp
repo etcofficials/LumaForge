@@ -214,9 +214,11 @@ std::string toJson(const Project& project, const std::string& projectDir) {
         json j = {{"id", raw(m.id)}, {"path", m.path}, {"relativePath", relativeTo(m.path, projectDir)}, {"displayName", m.displayName},
                   {"fingerprintSize", m.fingerprintSize}, {"fingerprintMtime", m.fingerprintMtime}, {"addedUnixTime", m.addedUnixTime},
                   {"info", write(m.info)}};
+        if (!m.bin.empty()) j["bin"] = m.bin;
         media.push_back(std::move(j));
     }
     root["media"] = std::move(media);
+    root["bins"] = project.bins;
 
     json tracks = json::array();
     for (const auto& t : project.sequence.tracks) {
@@ -258,12 +260,17 @@ Result<LoadResult> fromJson(const std::string& text, const std::string& projectD
         if (p.settings.width < 16 || p.settings.height < 16 || !p.settings.frameRate.isValid() || p.settings.frameRate.isZero()) return Error{"The project settings are invalid."};
     }
 
+    p.bins.clear();
+    if (auto it = root.find("bins"); it != root.end() && it->is_array()) {
+        for (const auto& b : *it) if (b.is_string() && !b.get<std::string>().empty()) p.bins.push_back(b.get<std::string>());
+    }
     p.media.clear();
     if (auto it = root.find("media"); it != root.end() && it->is_array()) {
         for (const auto& j : *it) {
             MediaItem m;
             getId(j, "id", m.id); get(j, "path", m.path); get(j, "displayName", m.displayName);
             get(j, "fingerprintSize", m.fingerprintSize); get(j, "fingerprintMtime", m.fingerprintMtime); get(j, "addedUnixTime", m.addedUnixTime);
+            get(j, "bin", m.bin);
             if (auto info = j.find("info"); info != j.end() && info->is_object()) read(*info, m.info);
             if (!isValid(m.id)) continue;
             // Resolve: absolute path first, then relative to the project file.

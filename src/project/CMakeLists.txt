@@ -8,12 +8,14 @@ add_library(lf_project STATIC
     include/lumaforge/project/TimelineCommands.h
     include/lumaforge/project/TimelineOps.h
     include/lumaforge/project/ProjectSerializer.h
+    include/lumaforge/project/TitlePresets.h
     src/Sequence.cpp
     src/Document.cpp
     src/MediaCommands.cpp
     src/TimelineCommands.cpp
     src/TimelineOps.cpp
     src/ProjectSerializer.cpp
+    src/TitlePresets.cpp
 )
 add_library(lumaforge::project ALIAS lf_project)
 target_include_directories(lf_project PUBLIC include PRIVATE "${CMAKE_SOURCE_DIR}/third_party")

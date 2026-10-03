@@ -69,8 +69,4 @@ private:
     ParamSlider* m_blur = nullptr;
 };
 
-// Applies a named preset to the clip's text and transform.
-void applyTextPreset(project::Clip& clip, int preset, int frameWidth, int frameHeight);
-const QStringList& textPresetNames();
-
 }  // namespace lf::ui

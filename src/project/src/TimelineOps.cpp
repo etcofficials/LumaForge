@@ -797,6 +797,19 @@ SequenceEdit setTrackHeight(Document& doc, TrackId id, int height) {
 
 // ---------------------------------------------------------------- helpers
 
+SequenceEdit addEffect(const Sequence& seq, const std::vector<ClipId>& ids, const Effect& effect) {
+    SequenceEdit edit;
+    for (auto id : ids) {
+        const Clip* c = seq.findClip(id);
+        if (!c || !isVisualClip(c->kind)) continue;
+        if (const Track* t = seq.findTrack(c->track); !t || t->locked) continue;
+        Clip n = *c;
+        n.effects.push_back(effect);
+        edit.modify(std::move(n));
+    }
+    return edit;
+}
+
 std::vector<Clip> applied(const Sequence& seq, const SequenceEdit& edit) { return effectiveClips(seq, edit); }
 
 std::vector<ClipId> withLinked(const Sequence& seq, const std::vector<ClipId>& ids) {

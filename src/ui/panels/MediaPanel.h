@@ -4,6 +4,9 @@
 
 #include <QWidget>
 
+#include <optional>
+
+class QComboBox;
 class QLineEdit;
 class QListView;
 class QSortFilterProxyModel;
@@ -16,12 +19,14 @@ namespace lf::ui {
 class ActionRegistry;
 class EmptyState;
 class ImportController;
+class MediaFilterProxy;
 class MediaModel;
 class PanelHeader;
 class ThumbnailService;
 
 // The media bin: grid or list view over the document's media, with search,
-// sorting, drag-out to the timeline, drop-in from Explorer and a context menu.
+// type/usage filters, bins (folders), sorting, drag-out to the timeline,
+// drop-in from Explorer and a context menu.
 class MediaPanel : public QWidget {
     Q_OBJECT
 public:
@@ -33,6 +38,11 @@ public:
     [[nodiscard]] QImage thumbnail(project::MediaId id) const;
     // Selects and scrolls to the item (clears any search that would hide it).
     void revealMedia(project::MediaId id);
+    // Shows only this bin ("" = unsorted items); clearBinFilter shows every bin.
+    void showBin(const QString& bin);
+    void clearBinFilter();
+    // Removes every item not used by the timeline (one undo step); returns how many.
+    int removeUnused();
 
 signals:
     void thumbnailsChanged();
@@ -56,17 +66,27 @@ private:
     void revealInExplorer(project::MediaId id);
     void showProperties(project::MediaId id);
     void selectMedia(const QList<project::MediaId>& ids);
+    void renameMedia(project::MediaId id);
+    void rebuildBinFilter();
+    void newBin(const QList<project::MediaId>& moveIds);
+    void renameCurrentBin();
+    void deleteCurrentBin();
+    [[nodiscard]] std::optional<QString> currentBin() const;   // nullopt = all bins, "" = unsorted
 
     project::Document& m_doc;
     ActionRegistry& m_actions;
     ImportController& m_importer;
     MediaModel* m_model;
-    QSortFilterProxyModel* m_proxy;
+    MediaFilterProxy* m_proxy;
     ThumbnailService* m_thumbnails;
 
     PanelHeader* m_header;
     QWidget* m_toolRow;
     QLineEdit* m_search;
+    QWidget* m_filterRow;
+    QComboBox* m_typeFilter;
+    QComboBox* m_binFilter;
+    QToolButton* m_binButton;
     QToolButton* m_gridButton;
     QToolButton* m_listButton;
     QToolButton* m_sortButton;

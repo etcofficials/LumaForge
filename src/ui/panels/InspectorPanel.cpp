@@ -212,9 +212,13 @@ void InspectorPanel::applyTabVisibility() {
         if (any) offered.push_back(t);
     }
     const QSignalBlocker block(m_tabs);
-    for (int i = 0; i < m_tabs->count(); ++i) {
-        const auto t = static_cast<InspectorTab>(m_tabs->tabData(i).toInt());
-        m_tabs->setTabVisible(i, std::find(offered.begin(), offered.end(), t) != offered.end());
+    // Rebuild the tab set rather than hiding tabs: QTabBar leaves a tab that is
+    // re-shown while the panel is hidden with an empty rectangle.
+    bool same = m_tabs->count() == static_cast<int>(offered.size());
+    for (int i = 0; same && i < m_tabs->count(); ++i) same = static_cast<InspectorTab>(m_tabs->tabData(i).toInt()) == offered[static_cast<std::size_t>(i)];
+    if (!same) {
+        while (m_tabs->count()) m_tabs->removeTab(0);
+        for (InspectorTab t : offered) m_tabs->setTabData(m_tabs->addTab(tabName(t)), static_cast<int>(t));
     }
     if (!offered.empty() && std::find(offered.begin(), offered.end(), m_currentTab) == offered.end()) {
         // Keep the user's tab when possible; otherwise the first useful one (Text for titles, Audio for sound...).
@@ -254,6 +258,7 @@ void InspectorPanel::onDocumentChange(const Change& change) {
             break;
         case Change::Kind::ClipsChanged:
         case Change::Kind::MediaChanged:
+        case Change::Kind::MediaOrganized:
         case Change::Kind::Settings:
         case Change::Kind::TracksChanged:
             reload();

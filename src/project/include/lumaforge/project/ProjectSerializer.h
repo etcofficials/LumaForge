@@ -13,7 +13,7 @@ namespace lf::project {
 // on load; a newer version than we know is refused with a clear message.
 namespace serializer {
 
-inline constexpr int kFormatVersion = 3;   // 2: per-axis scale, flips, effects list; 3: clip enable, In/Out (V0.4 additions)
+inline constexpr int kFormatVersion = 4;   // 2: per-axis scale, flips, effects list; 3: clip enable, In/Out; 4: media bins
 inline constexpr const char* kFormatName = "lumaforge-project";
 inline constexpr const char* kFileExtension = ".lfproj";
 

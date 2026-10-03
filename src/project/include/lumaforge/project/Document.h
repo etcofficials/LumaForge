@@ -17,7 +17,8 @@ struct Change {
         Settings,
         MediaAdded,
         MediaRemoved,
-        MediaChanged,
+        MediaChanged,     // the file behind an item changed (relink): thumbnails etc. are stale
+        MediaOrganized,   // names, bins or bin assignments changed; the files did not
         TracksChanged,    // track added/removed/reordered/muted/locked
         ClipsChanged,     // any clip geometry or property change
         MarksChanged,     // sequence In/Out points (and markers)

@@ -9,6 +9,8 @@
 #include <QSet>
 #include <QUrl>
 
+#include <utility>
+
 namespace lf::ui {
 
 namespace {
@@ -30,6 +32,7 @@ QString fpsText(const project::MediaItem& m) {
 
 MediaModel::MediaModel(project::Document& doc, QObject* parent) : QAbstractTableModel(parent), m_doc(doc) {
     m_listenerToken = m_doc.addListener([this](const project::Change& c) { onDocumentChange(c); });
+    recountUses();
 }
 
 MediaModel::~MediaModel() { m_doc.removeListener(m_listenerToken); }
@@ -50,6 +53,8 @@ QVariant MediaModel::data(const QModelIndex& index, int role) const {
         case OfflineRole: return m.offline;
         case HasAudioRole: return m.info.hasAudio();
         case HasVideoRole: return m.info.hasVideo();
+        case BinRole: return qs(m.bin);
+        case UseCountRole: return m_useCount.value(m.id, 0);
         case ThumbnailRole: {
             auto it = m_thumbnails.find(m.id);
             if (it != m_thumbnails.end()) return *it;
@@ -69,6 +74,9 @@ QVariant MediaModel::data(const QModelIndex& index, int role) const {
             if (m.info.audio) lines << QStringLiteral("%1 · %2 ch · %3 Hz").arg(qs(m.info.audio->codecName)).arg(m.info.audio->channels).arg(m.info.audio->sampleRate);
             if (m.type() != media::MediaType::Image) lines << durationText(m);
             lines << qs(formatBytes(m.info.fileSize));
+            if (!m.bin.empty()) lines << tr("Bin: %1").arg(qs(m.bin).toHtmlEscaped());
+            const int uses = m_useCount.value(m.id, 0);
+            lines << (uses ? tr("Used by %n clip(s) in the timeline", nullptr, uses) : tr("Not used in the timeline"));
             if (m.offline) lines << QStringLiteral("<span style='color:#E5533D'>File is missing</span>");
             return lines.join(QStringLiteral("<br>"));
         }
@@ -91,11 +99,15 @@ QVariant MediaModel::data(const QModelIndex& index, int role) const {
                 if (!m.info.audio) return QStringLiteral("—");
                 return sort ? QVariant(qs(m.info.audio->codecName)) : QVariant(QStringLiteral("%1 · %2ch").arg(qs(m.info.audio->codecName)).arg(m.info.audio->channels));
             case Size: return sort ? QVariant(static_cast<qulonglong>(m.info.fileSize)) : QVariant(qs(formatBytes(m.info.fileSize)));
+            case Uses: {
+                const int uses = m_useCount.value(m.id, 0);
+                return sort ? QVariant(uses) : QVariant(uses ? QString::number(uses) : QStringLiteral("—"));
+            }
             default: return {};
         }
     }
     if (role == Qt::TextAlignmentRole) {
-        if (index.column() == Duration || index.column() == FrameRate || index.column() == Size) return int(Qt::AlignRight | Qt::AlignVCenter);
+        if (index.column() == Duration || index.column() == FrameRate || index.column() == Size || index.column() == Uses) return int(Qt::AlignRight | Qt::AlignVCenter);
     }
     return {};
 }
@@ -111,6 +123,7 @@ QVariant MediaModel::headerData(int section, Qt::Orientation orientation, int ro
         case VideoCodec: return tr("Video");
         case AudioCodec: return tr("Audio");
         case Size: return tr("Size");
+        case Uses: return tr("Uses");
         default: return {};
     }
 }
@@ -171,6 +184,24 @@ void MediaModel::setThumbnail(project::MediaId id, const QImage& image) {
     if (idx.isValid()) emit dataChanged(idx, idx, {ThumbnailRole, Qt::DecorationRole});
 }
 
+void MediaModel::recountUses() {
+    QHash<project::MediaId, int> counts;
+    for (const auto& c : m_doc.project().sequence.clips) {
+        // A linked video+audio pair counts once (the visual half).
+        if (!project::isValid(c.media) || (project::isValid(c.link) && c.kind == project::ClipKind::Audio)) continue;
+        ++counts[c.media];
+    }
+    if (counts == m_useCount) return;
+    const auto old = std::exchange(m_useCount, std::move(counts));
+    const auto& media = m_doc.project().media;
+    for (std::size_t i = 0; i < media.size(); ++i) {
+        if (old.value(media[i].id, 0) != m_useCount.value(media[i].id, 0)) {
+            const int row = static_cast<int>(i);
+            emit dataChanged(index(row, 0), index(row, ColumnCount - 1), {UseCountRole, Qt::DisplayRole, Qt::ToolTipRole, SortKeyRole});
+        }
+    }
+}
+
 void MediaModel::onDocumentChange(const project::Change& change) {
     using K = project::Change::Kind;
     switch (change.kind) {
@@ -178,6 +209,18 @@ void MediaModel::onDocumentChange(const project::Change& change) {
         case K::MediaAdded:
         case K::MediaRemoved:
             rebuild();
+            recountUses();
+            break;
+        case K::ClipsChanged:
+        case K::TracksChanged:
+            recountUses();
+            break;
+        case K::MediaOrganized:
+            if (change.mediaIds.empty()) break;
+            for (auto id : change.mediaIds) {
+                const QModelIndex idx = indexOf(id);
+                if (idx.isValid()) emit dataChanged(idx, index(idx.row(), ColumnCount - 1));
+            }
             break;
         case K::MediaChanged:
             for (auto id : change.mediaIds) {

@@ -6,12 +6,19 @@
 #include "../TestMain.h"
 
 #include "lumaforge/project/Document.h"
+#include "lumaforge/project/MediaCommands.h"
 #include "ui/ActionRegistry.h"
 #include "ui/MainWindow.h"
 #include "ui/dialogs/CommandPalette.h"
+#include "ui/panels/MediaPanel.h"
 #include "ui/timeline/TimelineView.h"
 
 #include <QAction>
+#include <QComboBox>
+#include <QListView>
+#include <QListWidget>
+#include <QPushButton>
+#include <QTreeWidget>
 #include <QApplication>
 #include <QDir>
 #include <QLabel>
@@ -251,6 +258,133 @@ TEST_CASE("inspector: only applicable tabs; multi-selection banner and shared pr
     CHECK(banner->isVisible());
     CHECK(banner->text().contains(QStringLiteral("2 items")));
     CHECK(offered(QStringLiteral("Text")));
+}
+
+TEST_CASE("titles and effects browsers: add a preset title, apply an effect, undo each") {
+    newProject();
+    focusTimeline();
+    const auto& seq = g_window->document().project().sequence;
+    auto* titles = g_window->findChild<QListWidget*>(QStringLiteral("titlesList"));
+    auto* addTitle = g_window->findChild<QPushButton*>(QStringLiteral("titlesAdd"));
+    auto* tree = g_window->findChild<QTreeWidget*>(QStringLiteral("effectsTree"));
+    auto* applyFx = g_window->findChild<QPushButton*>(QStringLiteral("effectsApply"));
+    CHECK(titles && addTitle && tree && applyFx);
+    if (!titles || !addTitle || !tree || !applyFx) return;
+    CHECK(titles->count() >= 7);
+    CHECK(!addTitle->isEnabled());                         // nothing chosen yet
+    titles->setCurrentRow(2);                              // Lower Third
+    CHECK(addTitle->isEnabled());
+    addTitle->click();
+    pump();
+    CHECK(seq.clips.size() == 1);
+    if (seq.clips.size() != 1) return;
+    CHECK(seq.clips[0].name == "Lower Third" && seq.clips[0].text.align == TextAlign::Left);
+    CHECK(timeline()->selection().size() == 1);            // the new title is selected
+
+    QTreeWidgetItem* pixelate = nullptr;
+    for (auto* item : tree->findItems(QStringLiteral("Pixelate"), Qt::MatchExactly | Qt::MatchRecursive)) pixelate = item;
+    CHECK(pixelate != nullptr);
+    if (!pixelate) return;
+    tree->setCurrentItem(pixelate);
+    CHECK(applyFx->isEnabled());
+    applyFx->click();
+    pump();
+    CHECK(seq.clips[0].effects.size() == 1 && seq.clips[0].effects[0].type == EffectType::Pixelate);
+    focusTimeline();
+    press(Qt::Key_Z, Qt::ControlModifier);
+    CHECK(seq.clips[0].effects.empty());
+    press(Qt::Key_Z, Qt::ControlModifier);
+    CHECK(seq.clips.empty());
+    // With nothing selected the effect cannot be applied.
+    CHECK(!applyFx->isEnabled());
+}
+
+TEST_CASE("media panel: type and usage filters, bins, rename") {
+    newProject();
+    auto& doc = g_window->document();
+    auto make = [&doc](const char* name, media::MediaType type) {
+        project::MediaItem m;
+        m.id = doc.allocateMediaId();
+        m.path = std::string("G:/Caches/tmp/lf_ui_tests/") + name;
+        m.displayName = name;
+        m.info.type = type;
+        m.info.duration = Duration::fromSeconds(3);
+        if (type != media::MediaType::Audio) { media::VideoStreamInfo v; v.width = 640; v.height = 360; v.frameRate = fps::f30; m.info.video = v; }
+        if (type != media::MediaType::Image) { media::AudioStreamInfo a; a.channels = 2; a.sampleRate = 48000; m.info.audio = a; }
+        return m;
+    };
+    std::vector<project::MediaItem> items{make("clip.mp4", media::MediaType::Video), make("song.wav", media::MediaType::Audio),
+                                          make("logo.png", media::MediaType::Image)};
+    const project::MediaId video = items[0].id, audio = items[1].id;
+    doc.push(std::make_unique<project::ImportMediaCommand>(doc, std::move(items)));
+    pump();
+    auto* panel = g_window->findChild<MediaPanel*>();
+    auto* grid = panel ? panel->findChild<QListView*>(QStringLiteral("mediaGrid")) : nullptr;
+    auto* typeFilter = g_window->findChild<QComboBox*>(QStringLiteral("mediaTypeFilter"));
+    auto* binFilter = g_window->findChild<QComboBox*>(QStringLiteral("mediaBinFilter"));
+    CHECK(grid && typeFilter && binFilter);
+    if (!grid || !typeFilter || !binFilter) return;
+    auto shown = [grid] { return grid->model()->rowCount(); };
+    typeFilter->setCurrentIndex(0);
+    CHECK(shown() == 3);
+    typeFilter->setCurrentIndex(2);                        // Audio
+    CHECK(shown() == 1);
+    typeFilter->setCurrentIndex(4);                        // Unused: nothing is on the timeline yet
+    CHECK(shown() == 3);
+    timeline()->addMedia({video}, TimePoint::zero());
+    pump();
+    CHECK(shown() == 2);                                   // the video is used now
+    typeFilter->setCurrentIndex(0);
+
+    // Bins: moving into a new bin creates it; the bin filter shows just its items.
+    doc.push(project::OrganizeMediaCommand::moveToBin(doc, {audio}, "Music"));
+    pump();
+    CHECK(binFilter->findText(QStringLiteral("Music")) >= 0);
+    panel->showBin(QStringLiteral("Music"));
+    CHECK(shown() == 1);
+    panel->showBin(QString());                             // unsorted
+    CHECK(shown() == 2);
+    panel->clearBinFilter();
+    CHECK(shown() == 3);
+    press(Qt::Key_Z, Qt::ControlModifier);                 // undo the move: the bin goes away
+    pump();
+    CHECK(binFilter->findText(QStringLiteral("Music")) < 0);
+    CHECK(panel->removeUnused() == 2);                     // song + logo
+    CHECK(doc.project().media.size() == 1);
+}
+
+TEST_CASE("inspector tabs re-laid out when the selection changes kind (video -> title)") {
+    newProject();
+    auto& doc = g_window->document();
+    project::MediaItem m;
+    m.id = doc.allocateMediaId();
+    m.path = "G:/Caches/tmp/lf_ui_tests/v.mp4";
+    m.displayName = "v.mp4";
+    m.info.type = media::MediaType::Video;
+    m.info.duration = Duration::fromSeconds(6);
+    { media::VideoStreamInfo v; v.width = 640; v.height = 360; v.frameRate = fps::f30; m.info.video = v; }
+    { media::AudioStreamInfo a; a.channels = 2; a.sampleRate = 48000; m.info.audio = a; }
+    const auto id = m.id;
+    doc.push(std::make_unique<project::ImportMediaCommand>(doc, std::vector<project::MediaItem>{m}));
+    g_window->resize(1442, 892);
+    g_window->show();
+    pump();
+    timeline()->addMedia({id}, TimePoint::zero());
+    pump();
+    auto* tabs = g_window->findChild<QTabBar*>(QStringLiteral("inspectorTabs"));
+    for (int i = 0; i < tabs->count(); ++i) if (tabs->tabText(i) == QStringLiteral("Effects")) tabs->setCurrentIndex(i);
+    pump();
+    focusTimeline();
+    press(Qt::Key_T, Qt::ControlModifier);
+    pump();
+    CHECK(tabs->isVisible());
+    QStringList names;
+    for (int i = 0; i < tabs->count(); ++i) {
+        names << tabs->tabText(i);
+        CHECK(tabs->tabRect(i).width() > 0);           // every offered tab is laid out
+    }
+    CHECK(names.contains(QStringLiteral("Text")) && names.contains(QStringLiteral("Effects")) && names.contains(QStringLiteral("Transform")));
+    CHECK(!names.contains(QStringLiteral("Audio")) && !names.contains(QStringLiteral("Video")));
 }
 
 int main(int argc, char** argv) {

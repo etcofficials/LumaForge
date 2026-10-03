@@ -62,6 +62,32 @@ private:
     ProjectSettings m_old;
 };
 
+// Bin list and bin assignments, as one undoable step: create/rename/delete a
+// bin, move items between bins. `assign` lists only the items that change.
+class OrganizeMediaCommand final : public cmd::Command {
+public:
+    OrganizeMediaCommand(Document& doc, std::string text, std::vector<std::string> bins, std::vector<std::pair<MediaId, std::string>> assign);
+    [[nodiscard]] std::string text() const override { return m_text; }
+    void redo() override;
+    void undo() override;
+
+    // Ready-made edits (nullptr when there is nothing to do).
+    static cmd::CommandPtr createBin(Document& doc, const std::string& name);
+    static cmd::CommandPtr renameBin(Document& doc, const std::string& from, const std::string& to);
+    static cmd::CommandPtr deleteBin(Document& doc, const std::string& name);   // items become unsorted
+    static cmd::CommandPtr moveToBin(Document& doc, const std::vector<MediaId>& ids, const std::string& bin);
+    // A name not yet used by a bin: "Bin", "Bin 2", ...
+    [[nodiscard]] static std::string uniqueBinName(const Project& project, const std::string& base);
+
+private:
+    void apply(const std::vector<std::string>& bins, const std::vector<std::pair<MediaId, std::string>>& assign);
+
+    Document& m_doc;
+    std::string m_text;
+    std::vector<std::string> m_bins, m_oldBins;
+    std::vector<std::pair<MediaId, std::string>> m_assign, m_oldAssign;
+};
+
 class RenameMediaCommand final : public cmd::Command {
 public:
     RenameMediaCommand(Document& doc, MediaId id, std::string newName);

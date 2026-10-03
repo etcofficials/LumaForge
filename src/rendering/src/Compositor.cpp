@@ -30,6 +30,7 @@ struct alignas(16) LayerConstants {
     std::int32_t mode[4];
     float misc[4];
     float fx[4];          // grayscale mix, sepia mix, blur radius (texels), sharpen amount
+    float fx2[4];         // invert mix, posterize levels, pixelate block (source pixels), unused
 };
 static_assert(sizeof(LayerConstants) % 16 == 0);
 
@@ -243,6 +244,12 @@ void Compositor::drawLayer(const Layer& layer, int frameW, int frameH, int targe
     if (ca.isIdentity() && fx.isIdentity()) flags |= 16;
     if (fx.blur > 0.0f) flags |= 32;
     if (fx.sharpen > 0.0f) flags |= 64;
+    if (fx.invert > 0.0f) flags |= 128;
+    if (fx.posterize > 0.0f) flags |= 256;
+    if (fx.pixelate > 1.0f) flags |= 512;
+    k.fx2[0] = fx.invert;
+    k.fx2[1] = fx.posterize;
+    k.fx2[2] = fx.pixelate;
     k.fx[0] = fx.grayscale;
     k.fx[1] = fx.sepia;
     k.fx[2] = fx.blur;      // in source texels; the shader scales by texel size

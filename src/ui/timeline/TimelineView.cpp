@@ -3,6 +3,8 @@
 #include "lumaforge/core/Log.h"
 #include "lumaforge/playback/SequenceProgram.h"
 #include "lumaforge/project/TimelineOps.h"
+#include "lumaforge/project/TitlePresets.h"
+#include "ui/DragMime.h"
 #include "ui/media/WaveformService.h"
 #include "ui/Theme.h"
 #include "ui/Timecode.h"
@@ -649,29 +651,38 @@ void TimelineView::duplicateSelection() {
     selectAdded(ops::duplicateClips(m_doc, ops::withLinked(m_doc.project().sequence, m_selection)), tr("Duplicate"));
 }
 
-void TimelineView::addTextClip() {
+void TimelineView::addTextClip(int preset) {
     const auto& seq = m_doc.project().sequence;
     // Topmost unlocked video track, so the title sits above the footage.
     const Track* track = nullptr;
     for (const auto& t : seq.tracks) if (t.kind == TrackKind::Video && !t.locked) { track = &t; break; }
     if (!track) return;
-    addTextClipAt(track->id, m_playhead);
+    addTextClipAt(track->id, m_playhead, preset);
 }
 
-void TimelineView::addTextClipAt(TrackId trackId, TimePoint at) {
+void TimelineView::addTextClipAt(TrackId trackId, TimePoint at, int preset) {
     const Track* track = m_doc.project().sequence.findTrack(trackId);
     if (!track || track->kind != TrackKind::Video || track->locked) return;
-    Clip c;
+    const auto& settings = m_doc.project().settings;
+    Clip c = makeTitleClip(preset, settings.width, settings.height);
     c.id = m_doc.allocateClipId();
     c.track = track->id;
-    c.kind = ClipKind::Text;
-    c.name = tr("Title").toStdString();
     c.start = at;
-    c.duration = ops::kDefaultTextDuration;
-    c.text.fontSize = static_cast<float>(m_doc.project().settings.height) * 0.09f;
-    c.text.shadow = true;
-    c.text.shadowBlur = 8.0f;
     selectAdded(ops::insertClips(m_doc, {c}), tr("Add Text"));
+}
+
+int TimelineView::addEffect(const std::vector<ClipId>& ids, EffectType type) {
+    SequenceEdit edit = ops::addEffect(m_doc.project().sequence, ids, makeEffect(type));
+    const int n = static_cast<int>(edit.modified.size());
+    if (n) commit(tr("Add %1").arg(QString::fromUtf8(effectInfo(type).name)), std::move(edit));
+    return n;
+}
+
+std::vector<ClipId> TimelineView::effectTargets(ClipId under) const {
+    // Dropping on a selected clip applies to the whole selection; otherwise to that clip.
+    if (!isValid(under)) return {};
+    if (isSelected(under)) return m_selection;
+    return {under};
 }
 
 void TimelineView::splitAtPlayhead() {
@@ -1213,6 +1224,25 @@ void TimelineView::dragEnterEvent(QDragEnterEvent* e) {
     m_dropClips.clear();
     m_dropGhosts.clear();
     m_dropIsFiles = false;
+    m_dropEffect = EffectType::Count;
+    m_dropEffectTarget = ClipId::Invalid;
+    if (e->mimeData()->hasFormat(QString::fromLatin1(mime::kEffect))) {
+        m_dropEffect = effectTypeFromId(e->mimeData()->data(QString::fromLatin1(mime::kEffect)).toStdString());
+        if (m_dropEffect == EffectType::Count) return;
+        e->acceptProposedAction();
+        dragMoveEvent(static_cast<QDragMoveEvent*>(e));
+        return;
+    }
+    if (e->mimeData()->hasFormat(QString::fromLatin1(mime::kTitle))) {
+        const int preset = e->mimeData()->data(QString::fromLatin1(mime::kTitle)).toInt();
+        const auto& settings = m_doc.project().settings;
+        Clip c = makeTitleClip(preset, settings.width, settings.height);
+        c.id = m_doc.allocateClipId();
+        m_dropClips.push_back(std::move(c));
+        e->acceptProposedAction();
+        dragMoveEvent(static_cast<QDragMoveEvent*>(e));
+        return;
+    }
     const auto ids = MediaModel::decodeMime(e->mimeData());
     if (!ids.isEmpty()) {
         // Build the clips once (ids allocated now); dragMove only repositions them.
@@ -1239,6 +1269,20 @@ void TimelineView::dragEnterEvent(QDragEnterEvent* e) {
 
 void TimelineView::dragMoveEvent(QDragMoveEvent* e) {
     const QPoint pos = e->position().toPoint();
+    if (m_dropEffect != EffectType::Count) {
+        // Effects land on the visual clip under the cursor.
+        const ClipId before = m_dropEffectTarget;
+        m_dropEffectTarget = ClipId::Invalid;
+        const Hit hit = pos.x() >= headerWidth() ? hitTest(pos) : Hit{};
+        const auto& seq = m_doc.project().sequence;
+        if (const Clip* c = seq.findClip(hit.clip); c && isVisualClip(c->kind)) {
+            if (const Track* t = seq.findTrack(c->track); t && !t->locked) m_dropEffectTarget = c->id;
+        }
+        if (isValid(m_dropEffectTarget)) e->acceptProposedAction();
+        else e->ignore();
+        if (before != m_dropEffectTarget) update(lanesRect());
+        return;
+    }
     if (pos.x() < headerWidth()) { e->ignore(); return; }
     e->acceptProposedAction();
     TimePoint t{std::max<Ticks>(0, ticksFromX(pos.x()))};
@@ -1285,13 +1329,27 @@ void TimelineView::dragLeaveEvent(QDragLeaveEvent*) {
     m_dropGhosts.clear();
     m_dropClips.clear();
     m_dropIsFiles = false;
+    m_dropEffect = EffectType::Count;
+    m_dropEffectTarget = ClipId::Invalid;
     m_snapGuide.reset();
     update();
 }
 
 void TimelineView::dropEvent(QDropEvent* e) {
     dragMoveEvent(static_cast<QDragMoveEvent*>(e));
+    if (m_dropEffect != EffectType::Count) {
+        const EffectType type = m_dropEffect;
+        const auto targets = effectTargets(m_dropEffectTarget);
+        dragLeaveEvent(nullptr);
+        if (targets.empty()) { e->ignore(); return; }
+        e->acceptProposedAction();
+        addEffect(targets, type);
+        if (!isSelected(targets.front())) setSelection(targets);
+        setFocus(Qt::OtherFocusReason);
+        return;
+    }
     e->acceptProposedAction();
+    const bool isTitle = m_dropClips.size() == 1 && m_dropClips.front().kind == ClipKind::Text;
     if (m_dropIsFiles) {
         const QStringList paths = ImportController::collectMediaPaths(e->mimeData()->urls());
         const TimePoint at = m_dropTime;
@@ -1303,7 +1361,7 @@ void TimelineView::dropEvent(QDropEvent* e) {
     std::vector<ClipId> ids;
     for (const auto& c : clips) ids.push_back(c.id);
     dragLeaveEvent(nullptr);
-    commit(tr("Add to Timeline"), ops::insertClips(m_doc, std::move(clips)));
+    commit(isTitle ? tr("Add Title") : tr("Add to Timeline"), ops::insertClips(m_doc, std::move(clips)));
     setSelection(ids);
     setFocus(Qt::OtherFocusReason);
 }
@@ -1720,8 +1778,21 @@ void TimelineView::paintClip(QPainter& p, const Clip& c, const QRectF& r, bool s
 }
 
 void TimelineView::paintDropGhosts(QPainter& p) {
-    if (m_dropGhosts.empty()) return;
     const auto& pal = Theme::palette();
+    if (isValid(m_dropEffectTarget)) {
+        // Outline every clip the dragged effect will be applied to.
+        p.save();
+        p.setClipRect(laneArea());
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setPen(QPen(pal.accent, 2.0));
+        p.setBrush(QColor(pal.accent.red(), pal.accent.green(), pal.accent.blue(), 40));
+        const auto& seq = m_doc.project().sequence;
+        for (auto id : effectTargets(m_dropEffectTarget)) {
+            if (const Clip* c = seq.findClip(id); c && isVisualClip(c->kind)) p.drawRoundedRect(clipRect(*c).adjusted(1, 1, -1, -1), 3, 3);
+        }
+        p.restore();
+    }
+    if (m_dropGhosts.empty()) return;
     p.save();
     p.setClipRect(laneArea());
     p.setRenderHint(QPainter::Antialiasing, true);

@@ -21,7 +21,7 @@ class EffectsSection final : public InspectorSection {
 public:
     explicit EffectsSection(InspectorContext& ctx, QWidget* parent = nullptr);
 
-    [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return kind == project::ClipKind::Video || kind == project::ClipKind::Image; }
+    [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return project::isVisualClip(kind); }
     [[nodiscard]] InspectorTab tab() const override { return InspectorTab::Effects; }
     void load(const project::Clip& primary, int selectedCount) override;
 

@@ -129,6 +129,10 @@ std::optional<TimePoint> snap(TimePoint t, const std::vector<TimePoint>& targets
 // Media duration in sequence time for a clip's source (images/text: unbounded).
 std::optional<Duration> mediaDuration(const Project& project, const Clip& clip);
 
+// Appends `effect` to every visual clip among `ids` (audio clips and clips on
+// locked tracks are skipped). Empty when nothing applies.
+SequenceEdit addEffect(const Sequence& seq, const std::vector<ClipId>& ids, const Effect& effect);
+
 // The sequence's clips as they will be once `edit` executes (for previews).
 std::vector<Clip> applied(const Sequence& seq, const SequenceEdit& edit);
 

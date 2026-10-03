@@ -21,8 +21,11 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QComboBox>
 #include <QHeaderView>
+#include <QInputDialog>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QListView>
 #include <QMenu>
 #include <QMimeData>
@@ -43,6 +46,12 @@ constexpr const char* kViewModeKey = "media/gridView";
 constexpr const char* kSortKey = "media/sortColumn";
 constexpr const char* kSortOrderKey = "media/sortOrder";
 
+constexpr const char* kTypeFilterKey = "media/typeFilter";
+
+// Sentinels stored in the bin combo (a real bin name can never start with \x01).
+const QString kAllBins = QStringLiteral("\x01" "all");
+const QString kUnsorted = QStringLiteral("\x01" "unsorted");
+
 QToolButton* smallButton(QWidget* parent, const QString& icon, const QString& tip, bool checkable) {
     auto* b = new QToolButton(parent);
     b->setIcon(Icons::icon(icon));
@@ -56,6 +65,39 @@ QToolButton* smallButton(QWidget* parent, const QString& icon, const QString& ti
 }
 }  // namespace
 
+// Search text + type/usage filter + bin filter over the media model.
+class MediaFilterProxy : public QSortFilterProxyModel {
+public:
+    enum Type { All, Video, Audio, Image, Unused, Offline };
+    using QSortFilterProxyModel::QSortFilterProxyModel;
+
+    void setType(int t) { if (t != m_type) { m_type = t; invalidateFilter(); } }
+    void setBin(const std::optional<QString>& bin) { if (bin != m_bin) { m_bin = bin; invalidateFilter(); } }
+    void setText(const QString& t) { if (t != m_text) { m_text = t; invalidateFilter(); } }
+    void refilter() { invalidateFilter(); }
+
+protected:
+    bool filterAcceptsRow(int row, const QModelIndex& parent) const override {
+        const QModelIndex idx = sourceModel()->index(row, 0, parent);
+        if (!m_text.isEmpty() && !idx.data(Qt::DisplayRole).toString().contains(m_text, Qt::CaseInsensitive)) return false;
+        if (m_bin && idx.data(MediaModel::BinRole).toString() != *m_bin) return false;
+        const auto type = static_cast<media::MediaType>(idx.data(MediaModel::MediaTypeRole).toInt());
+        switch (m_type) {
+            case Video: return type == media::MediaType::Video;
+            case Audio: return type == media::MediaType::Audio;
+            case Image: return type == media::MediaType::Image;
+            case Unused: return idx.data(MediaModel::UseCountRole).toInt() == 0;
+            case Offline: return idx.data(MediaModel::OfflineRole).toBool();
+            default: return true;
+        }
+    }
+
+private:
+    int m_type = All;
+    std::optional<QString> m_bin;   // nullopt = all bins, "" = unsorted
+    QString m_text;
+};
+
 MediaPanel::MediaPanel(project::Document& doc, ActionRegistry& actions, ImportController& importer, QWidget* parent)
     : QWidget(parent), m_doc(doc), m_actions(actions), m_importer(importer) {
     setProperty("panel", true);
@@ -64,12 +106,9 @@ MediaPanel::MediaPanel(project::Document& doc, ActionRegistry& actions, ImportCo
     setAcceptDrops(true);
 
     m_model = new MediaModel(m_doc, this);
-    m_proxy = new QSortFilterProxyModel(this);
+    m_proxy = new MediaFilterProxy(this);
     m_proxy->setSourceModel(m_model);
     m_proxy->setSortRole(MediaModel::SortKeyRole);
-    m_proxy->setFilterRole(Qt::DisplayRole);
-    m_proxy->setFilterKeyColumn(MediaModel::Name);
-    m_proxy->setFilterCaseSensitivity(Qt::CaseInsensitive);
     m_proxy->setSortCaseSensitivity(Qt::CaseInsensitive);
     m_proxy->setDynamicSortFilter(true);
 
@@ -104,6 +143,58 @@ MediaPanel::MediaPanel(project::Document& doc, ActionRegistry& actions, ImportCo
     row->addWidget(m_listButton);
     row->addWidget(m_sortButton);
     layout->addWidget(m_toolRow);
+
+    // Filter row: media type / usage, and bin.
+    m_filterRow = new QWidget(this);
+    auto* frow = new QHBoxLayout(m_filterRow);
+    frow->setContentsMargins(8, 0, 8, 6);
+    frow->setSpacing(4);
+    m_typeFilter = new QComboBox(m_filterRow);
+    m_typeFilter->setObjectName(QStringLiteral("mediaTypeFilter"));
+    m_typeFilter->setFocusPolicy(Qt::NoFocus);
+    m_typeFilter->setToolTip(tr("Show only one kind of media"));
+    for (const char* t : {"All media", "Video", "Audio", "Images", "Unused", "Missing files"}) m_typeFilter->addItem(tr(t));
+    m_typeFilter->setCurrentIndex(std::clamp(QSettings().value(QString::fromLatin1(kTypeFilterKey), 0).toInt(), 0, m_typeFilter->count() - 1));
+    m_binFilter = new QComboBox(m_filterRow);
+    m_binFilter->setObjectName(QStringLiteral("mediaBinFilter"));
+    m_binFilter->setFocusPolicy(Qt::NoFocus);
+    m_binFilter->setToolTip(tr("Bins: folders that organise the project's media"));
+    m_binButton = smallButton(m_filterRow, QStringLiteral("folder"), tr("Bins"), false);
+    m_binButton->setPopupMode(QToolButton::InstantPopup);
+    frow->addWidget(m_typeFilter, 1);
+    frow->addWidget(m_binFilter, 1);
+    frow->addWidget(m_binButton);
+    layout->addWidget(m_filterRow);
+    auto* binMenu = new QMenu(m_binButton);
+    auto* newBinAct = binMenu->addAction(tr("New Bin…"));
+    auto* renameBinAct = binMenu->addAction(tr("Rename Bin…"));
+    auto* deleteBinAct = binMenu->addAction(tr("Delete Bin"));
+    binMenu->addSeparator();
+    auto* removeUnusedAct = binMenu->addAction(tr("Remove Unused Media"));
+    connect(binMenu, &QMenu::aboutToShow, this, [this, renameBinAct, deleteBinAct, removeUnusedAct] {
+        const auto bin = currentBin();
+        const bool real = bin && !bin->isEmpty();
+        renameBinAct->setEnabled(real);
+        deleteBinAct->setEnabled(real);
+        bool anyUnused = false;
+        for (const auto& m : m_doc.project().media) anyUnused |= m_model->useCount(m.id) == 0;
+        removeUnusedAct->setEnabled(anyUnused);
+    });
+    connect(newBinAct, &QAction::triggered, this, [this] { newBin({}); });
+    connect(renameBinAct, &QAction::triggered, this, [this] { renameCurrentBin(); });
+    connect(deleteBinAct, &QAction::triggered, this, [this] { deleteCurrentBin(); });
+    connect(removeUnusedAct, &QAction::triggered, this, [this] { removeUnused(); });
+    m_binButton->setMenu(binMenu);
+    connect(m_typeFilter, &QComboBox::currentIndexChanged, this, [this](int i) {
+        m_proxy->setType(i);
+        QSettings().setValue(QString::fromLatin1(kTypeFilterKey), i);
+        updateEmptyState();
+    });
+    connect(m_binFilter, &QComboBox::currentIndexChanged, this, [this] {
+        m_proxy->setBin(currentBin());
+        updateEmptyState();
+    });
+    m_proxy->setType(m_typeFilter->currentIndex());
 
     auto* sortMenu = new QMenu(m_sortButton);
     auto* sortGroup = new QActionGroup(sortMenu);
@@ -142,6 +233,7 @@ MediaPanel::MediaPanel(project::Document& doc, ActionRegistry& actions, ImportCo
     m_stack->addWidget(m_empty);
 
     m_grid = new QListView(this);
+    m_grid->setObjectName(QStringLiteral("mediaGrid"));
     m_grid->setModel(m_proxy);
     m_grid->setViewMode(QListView::IconMode);
     m_grid->setResizeMode(QListView::Adjust);
@@ -183,7 +275,7 @@ MediaPanel::MediaPanel(project::Document& doc, ActionRegistry& actions, ImportCo
     // Both views share one selection model so switching views keeps the selection.
     m_list->setSelectionModel(m_grid->selectionModel());
 
-    connect(m_search, &QLineEdit::textChanged, this, [this](const QString& t) { m_proxy->setFilterFixedString(t); updateEmptyState(); });
+    connect(m_search, &QLineEdit::textChanged, this, [this](const QString& t) { m_proxy->setText(t); updateEmptyState(); });
     connect(m_gridButton, &QToolButton::clicked, this, [this] { setViewMode(true); });
     connect(m_listButton, &QToolButton::clicked, this, [this] { setViewMode(false); });
     for (auto* view : {static_cast<QAbstractItemView*>(m_grid), static_cast<QAbstractItemView*>(m_list)}) {
@@ -197,7 +289,14 @@ MediaPanel::MediaPanel(project::Document& doc, ActionRegistry& actions, ImportCo
 
     m_proxy->sort(savedCol, savedOrder);
     setViewMode(settings.value(QString::fromLatin1(kViewModeKey), true).toBool());
-    m_listenerToken = m_doc.addListener([this](const project::Change&) { updateEmptyState(); });
+    m_listenerToken = m_doc.addListener([this](const project::Change& c) {
+        using K = project::Change::Kind;
+        if (c.kind == K::Reset || c.kind == K::MediaOrganized) rebuildBinFilter();
+        // Usage and bin membership feed the filter: re-evaluate it when they change.
+        if (c.kind == K::ClipsChanged || c.kind == K::TracksChanged || c.kind == K::MediaOrganized || c.kind == K::MediaChanged) m_proxy->refilter();
+        updateEmptyState();
+    });
+    rebuildBinFilter();
     updateEmptyState();
 }
 
@@ -222,6 +321,7 @@ void MediaPanel::setViewMode(bool grid) {
 void MediaPanel::updateEmptyState() {
     const bool hasMedia = m_model->rowCount() > 0;
     m_toolRow->setVisible(hasMedia);
+    m_filterRow->setVisible(hasMedia || !m_doc.project().bins.empty());
     if (!hasMedia) {
         m_stack->setCurrentWidget(m_empty);
         return;
@@ -231,7 +331,98 @@ void MediaPanel::updateEmptyState() {
 
 void MediaPanel::revealMedia(project::MediaId id) {
     if (!m_search->text().isEmpty()) m_search->clear();
+    m_typeFilter->setCurrentIndex(MediaFilterProxy::All);
+    if (const auto* item = m_model->item(id); item && currentBin() && *currentBin() != QString::fromStdString(item->bin)) clearBinFilter();
     selectMedia({id});
+    if (const QModelIndex src = m_model->indexOf(id); src.isValid()) {
+        const QModelIndex idx = m_proxy->mapFromSource(src);
+        m_grid->scrollTo(idx);
+        m_list->scrollTo(idx);
+    }
+}
+
+// ---------------------------------------------------------------- bins
+
+std::optional<QString> MediaPanel::currentBin() const {
+    const QString v = m_binFilter->currentData().toString();
+    if (v.isEmpty() || v == kAllBins) return std::nullopt;
+    if (v == kUnsorted) return QString();
+    return v;
+}
+
+void MediaPanel::rebuildBinFilter() {
+    const QString keep = m_binFilter->count() ? m_binFilter->currentData().toString() : kAllBins;
+    QSignalBlocker block(m_binFilter);
+    m_binFilter->clear();
+    m_binFilter->addItem(Icons::icon(QStringLiteral("folder")), tr("All bins"), kAllBins);
+    m_binFilter->addItem(tr("Unsorted"), kUnsorted);
+    for (const auto& b : m_doc.project().bins) m_binFilter->addItem(Icons::icon(QStringLiteral("folder")), QString::fromStdString(b), QString::fromStdString(b));
+    int i = m_binFilter->findData(keep);
+    m_binFilter->setCurrentIndex(i >= 0 ? i : 0);
+    m_proxy->setBin(currentBin());
+}
+
+void MediaPanel::showBin(const QString& bin) {
+    const int i = m_binFilter->findData(bin.isEmpty() ? kUnsorted : bin);
+    if (i >= 0) m_binFilter->setCurrentIndex(i);
+}
+
+void MediaPanel::clearBinFilter() { m_binFilter->setCurrentIndex(0); }
+
+void MediaPanel::newBin(const QList<project::MediaId>& moveIds) {
+    bool ok = false;
+    const QString suggested = QString::fromStdString(project::OrganizeMediaCommand::uniqueBinName(m_doc.project(), tr("Bin").toStdString()));
+    const QString name = QInputDialog::getText(this, tr("New Bin"), tr("Bin name:"), QLineEdit::Normal, suggested, &ok).trimmed();
+    if (!ok || name.isEmpty()) return;
+    const std::string n = name.toStdString();
+    for (const auto& b : m_doc.project().bins) {
+        if (b == n && moveIds.isEmpty()) { QMessageBox::information(this, tr("New Bin"), tr("A bin named \"%1\" already exists.").arg(name)); return; }
+    }
+    cmd::CommandPtr command = moveIds.isEmpty() ? project::OrganizeMediaCommand::createBin(m_doc, n)
+                                                : project::OrganizeMediaCommand::moveToBin(m_doc, std::vector<project::MediaId>(moveIds.begin(), moveIds.end()), n);
+    if (command) m_doc.push(std::move(command));
+    showBin(name);
+    if (!moveIds.isEmpty()) selectMedia(moveIds);
+}
+
+void MediaPanel::renameCurrentBin() {
+    const QString bin = currentBin().value_or(QString());
+    if (bin.isEmpty()) return;
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Rename Bin"), tr("Bin name:"), QLineEdit::Normal, bin, &ok).trimmed();
+    if (!ok || name.isEmpty() || name == bin) return;
+    if (auto command = project::OrganizeMediaCommand::renameBin(m_doc, bin.toStdString(), name.toStdString())) {
+        m_doc.push(std::move(command));
+        showBin(name);
+    } else {
+        QMessageBox::information(this, tr("Rename Bin"), tr("A bin named \"%1\" already exists.").arg(name));
+    }
+}
+
+void MediaPanel::deleteCurrentBin() {
+    const QString bin = currentBin().value_or(QString());
+    if (bin.isEmpty()) return;
+    if (auto command = project::OrganizeMediaCommand::deleteBin(m_doc, bin.toStdString())) m_doc.push(std::move(command));   // items become unsorted
+    clearBinFilter();
+}
+
+int MediaPanel::removeUnused() {
+    std::vector<project::MediaId> ids;
+    for (const auto& m : m_doc.project().media) if (m_model->useCount(m.id) == 0) ids.push_back(m.id);
+    if (ids.empty()) return 0;
+    const int n = static_cast<int>(ids.size());
+    m_doc.push(std::make_unique<project::RemoveMediaCommand>(m_doc, std::move(ids)));
+    return n;
+}
+
+void MediaPanel::renameMedia(project::MediaId id) {
+    const auto* item = m_model->item(id);
+    if (!item) return;
+    bool ok = false;
+    const QString current = QString::fromStdString(item->displayName);
+    const QString name = QInputDialog::getText(this, tr("Rename Media"), tr("Name:"), QLineEdit::Normal, current, &ok).trimmed();
+    if (!ok || name.isEmpty() || name == current) return;
+    m_doc.push(std::make_unique<project::RenameMediaCommand>(m_doc, id, name.toStdString()));
 }
 
 void MediaPanel::selectMedia(const QList<project::MediaId>& ids) {
@@ -263,10 +454,29 @@ void MediaPanel::showContextMenu(const QPoint& globalPos) {
             auto* reveal = menu.addAction(tr("Reveal in Explorer"));
             reveal->setEnabled(item && !item->offline);
             connect(reveal, &QAction::triggered, this, [this, id = ids.first()] { revealInExplorer(id); });
+            auto* rename = menu.addAction(tr("Rename…"));
+            connect(rename, &QAction::triggered, this, [this, id = ids.first()] { renameMedia(id); });
             auto* props = menu.addAction(tr("Properties…"));
             connect(props, &QAction::triggered, this, [this, id = ids.first()] { showProperties(id); });
             menu.addSeparator();
         }
+        // Move to bin
+        auto* binMenu = menu.addMenu(Icons::icon(QStringLiteral("folder")), tr("Move to Bin"));
+        const std::vector<project::MediaId> idv(ids.begin(), ids.end());
+        auto* unsorted = binMenu->addAction(tr("Unsorted"));
+        connect(unsorted, &QAction::triggered, this, [this, idv] {
+            if (auto c = project::OrganizeMediaCommand::moveToBin(m_doc, idv, {})) m_doc.push(std::move(c));
+        });
+        for (const auto& b : m_doc.project().bins) {
+            auto* a = binMenu->addAction(Icons::icon(QStringLiteral("folder")), QString::fromStdString(b));
+            connect(a, &QAction::triggered, this, [this, idv, b] {
+                if (auto c = project::OrganizeMediaCommand::moveToBin(m_doc, idv, b)) m_doc.push(std::move(c));
+            });
+        }
+        binMenu->addSeparator();
+        auto* toNew = binMenu->addAction(tr("New Bin…"));
+        connect(toNew, &QAction::triggered, this, [this, ids] { newBin(ids); });
+        menu.addSeparator();
         auto* remove = menu.addAction(Icons::icon(QStringLiteral("delete")), ids.size() == 1 ? tr("Remove from Project") : tr("Remove %1 Items from Project").arg(ids.size()));
         connect(remove, &QAction::triggered, this, [this] { removeSelected(); });
         menu.addSeparator();

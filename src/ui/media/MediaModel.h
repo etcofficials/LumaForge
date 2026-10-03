@@ -14,7 +14,7 @@ namespace lf::ui {
 class MediaModel : public QAbstractTableModel {
     Q_OBJECT
 public:
-    enum Column { Name, Type, Duration, Resolution, FrameRate, VideoCodec, AudioCodec, Size, ColumnCount };
+    enum Column { Name, Type, Duration, Resolution, FrameRate, VideoCodec, AudioCodec, Size, Uses, ColumnCount };
     enum Roles {
         MediaIdRole = Qt::UserRole + 1,
         MediaTypeRole,          // int(media::MediaType)
@@ -25,6 +25,8 @@ public:
         HasAudioRole,
         HasVideoRole,
         SortKeyRole,            // per-column sortable value
+        BinRole,                // QString, empty = unsorted
+        UseCountRole,           // int: clips in the sequence that use the item
     };
     static constexpr const char* kMimeType = "application/x-lumaforge-media-ids";
 
@@ -43,6 +45,7 @@ public:
     [[nodiscard]] project::MediaId idAt(const QModelIndex& index) const;
     [[nodiscard]] QModelIndex indexOf(project::MediaId id) const;
     [[nodiscard]] const project::MediaItem* item(project::MediaId id) const;
+    [[nodiscard]] int useCount(project::MediaId id) const { return m_useCount.value(id, 0); }
 
     static QList<project::MediaId> decodeMime(const QMimeData* data);
 
@@ -55,11 +58,13 @@ signals:
 private:
     void onDocumentChange(const project::Change& change);
     void rebuild();
+    void recountUses();
 
     project::Document& m_doc;
     int m_listenerToken = 0;
     QHash<project::MediaId, QImage> m_thumbnails;
     QHash<project::MediaId, bool> m_thumbnailRequested;
+    QHash<project::MediaId, int> m_useCount;
 };
 
 }  // namespace lf::ui

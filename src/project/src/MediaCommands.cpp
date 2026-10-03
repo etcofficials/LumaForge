@@ -74,15 +74,88 @@ void RenameMediaCommand::redo() {
     if (auto* m = m_doc.project().findMedia(m_id)) {
         m_oldName = m->displayName;
         m->displayName = m_newName;
-        m_doc.notify(Change{Change::Kind::MediaChanged, {m_id}, {}});
+        m_doc.notify(Change{Change::Kind::MediaOrganized, {m_id}, {}});
     }
 }
 
 void RenameMediaCommand::undo() {
     if (auto* m = m_doc.project().findMedia(m_id)) {
         m->displayName = m_oldName;
-        m_doc.notify(Change{Change::Kind::MediaChanged, {m_id}, {}});
+        m_doc.notify(Change{Change::Kind::MediaOrganized, {m_id}, {}});
     }
+}
+
+// ---------------------------------------------------------------- Bins
+
+OrganizeMediaCommand::OrganizeMediaCommand(Document& doc, std::string text, std::vector<std::string> bins, std::vector<std::pair<MediaId, std::string>> assign)
+    : m_doc(doc), m_text(std::move(text)), m_bins(std::move(bins)), m_assign(std::move(assign)) {}
+
+void OrganizeMediaCommand::apply(const std::vector<std::string>& bins, const std::vector<std::pair<MediaId, std::string>>& assign) {
+    Project& p = m_doc.project();
+    p.bins = bins;
+    Change change{Change::Kind::MediaOrganized, {}, {}};
+    for (const auto& [id, bin] : assign) {
+        if (auto* m = p.findMedia(id)) { m->bin = bin; change.mediaIds.push_back(id); }
+    }
+    m_doc.notify(change);
+}
+
+void OrganizeMediaCommand::redo() {
+    const Project& p = m_doc.project();
+    m_oldBins = p.bins;
+    m_oldAssign.clear();
+    for (const auto& [id, bin] : m_assign) if (const auto* m = p.findMedia(id)) m_oldAssign.emplace_back(id, m->bin);
+    apply(m_bins, m_assign);
+}
+
+void OrganizeMediaCommand::undo() { apply(m_oldBins, m_oldAssign); }
+
+std::string OrganizeMediaCommand::uniqueBinName(const Project& project, const std::string& base) {
+    auto taken = [&](const std::string& n) { return std::find(project.bins.begin(), project.bins.end(), n) != project.bins.end(); };
+    if (!taken(base)) return base;
+    for (int i = 2;; ++i) {
+        std::string n = base + " " + std::to_string(i);
+        if (!taken(n)) return n;
+    }
+}
+
+cmd::CommandPtr OrganizeMediaCommand::createBin(Document& doc, const std::string& name) {
+    const Project& p = doc.project();
+    if (name.empty() || std::find(p.bins.begin(), p.bins.end(), name) != p.bins.end()) return nullptr;
+    auto bins = p.bins;
+    bins.push_back(name);
+    return std::make_unique<OrganizeMediaCommand>(doc, "New Bin", std::move(bins), std::vector<std::pair<MediaId, std::string>>{});
+}
+
+cmd::CommandPtr OrganizeMediaCommand::renameBin(Document& doc, const std::string& from, const std::string& to) {
+    const Project& p = doc.project();
+    auto it = std::find(p.bins.begin(), p.bins.end(), from);
+    if (it == p.bins.end() || to.empty() || from == to || std::find(p.bins.begin(), p.bins.end(), to) != p.bins.end()) return nullptr;
+    auto bins = p.bins;
+    bins[static_cast<std::size_t>(it - p.bins.begin())] = to;
+    std::vector<std::pair<MediaId, std::string>> assign;
+    for (const auto& m : p.media) if (m.bin == from) assign.emplace_back(m.id, to);
+    return std::make_unique<OrganizeMediaCommand>(doc, "Rename Bin", std::move(bins), std::move(assign));
+}
+
+cmd::CommandPtr OrganizeMediaCommand::deleteBin(Document& doc, const std::string& name) {
+    const Project& p = doc.project();
+    if (std::find(p.bins.begin(), p.bins.end(), name) == p.bins.end()) return nullptr;
+    auto bins = p.bins;
+    bins.erase(std::remove(bins.begin(), bins.end(), name), bins.end());
+    std::vector<std::pair<MediaId, std::string>> assign;
+    for (const auto& m : p.media) if (m.bin == name) assign.emplace_back(m.id, std::string());
+    return std::make_unique<OrganizeMediaCommand>(doc, "Delete Bin", std::move(bins), std::move(assign));
+}
+
+cmd::CommandPtr OrganizeMediaCommand::moveToBin(Document& doc, const std::vector<MediaId>& ids, const std::string& bin) {
+    const Project& p = doc.project();
+    auto bins = p.bins;
+    if (!bin.empty() && std::find(bins.begin(), bins.end(), bin) == bins.end()) bins.push_back(bin);   // moving into a new bin creates it
+    std::vector<std::pair<MediaId, std::string>> assign;
+    for (auto id : ids) if (const auto* m = p.findMedia(id); m && m->bin != bin) assign.emplace_back(id, bin);
+    if (assign.empty() && bins == p.bins) return nullptr;
+    return std::make_unique<OrganizeMediaCommand>(doc, bin.empty() ? "Remove from Bin" : "Move to Bin", std::move(bins), std::move(assign));
 }
 
 // ---------------------------------------------------------------- Relink

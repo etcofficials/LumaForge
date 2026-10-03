@@ -77,6 +77,12 @@ void MediaTileDelegate::paint(QPainter* p, const QStyleOptionViewItem& opt, cons
         p->setPen(pal.textPrimary);
         p->drawText(badge, Qt::AlignCenter, text);
     }
+    if (index.data(MediaModel::UseCountRole).toInt() > 0) {
+        // In-timeline marker: a small accent tab on the top-right corner.
+        p->setPen(Qt::NoPen);
+        p->setBrush(pal.accent);
+        p->drawRoundedRect(QRect(thumbRect.right() - 13, thumbRect.top() + 5, 8, 8), 2, 2);
+    }
     if (index.data(MediaModel::OfflineRole).toBool()) {
         p->setPen(Qt::NoPen);
         p->setBrush(pal.danger);

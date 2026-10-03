@@ -1,5 +1,7 @@
 #include "ui/inspector/TextSections.h"
 
+#include "lumaforge/project/TitlePresets.h"
+
 #include "ui/widgets/ColorButton.h"
 #include "ui/widgets/ParamSlider.h"
 
@@ -17,47 +19,6 @@ namespace lf::ui {
 
 using namespace lf::project;
 
-// ---------------------------------------------------------------- presets
-
-const QStringList& textPresetNames() {
-    static const QStringList names{QObject::tr("Title"), QObject::tr("Subtitle"), QObject::tr("Lower Third"), QObject::tr("Caption")};
-    return names;
-}
-
-void applyTextPreset(Clip& c, int preset, int frameW, int frameH) {
-    // Presets only initialise properties; the user can change anything after.
-    const float h = static_cast<float>(frameH);
-    TextParams t;
-    t.text = c.text.text;   // keep what the user typed
-    Transform2D tf;
-    switch (preset) {
-        case 0:   // Title: big, bold, centred, soft shadow
-            t.fontSize = h * 0.09f; t.bold = true; t.align = TextAlign::Center; t.shadow = true; t.shadowBlur = 8; t.shadowOffsetX = t.shadowOffsetY = 4;
-            if (t.text.empty() || t.text == "Title") t.text = "Title";
-            break;
-        case 1:   // Subtitle: smaller, regular, near the bottom, outline for legibility
-            t.fontSize = h * 0.05f; t.bold = false; t.align = TextAlign::Center; t.outlineWidth = 2.0f; t.shadow = false;
-            tf.positionY = h * 0.36f;
-            if (t.text.empty() || t.text == "Title") t.text = "Subtitle";
-            break;
-        case 2:   // Lower third: left aligned, boxed, bottom-left
-            t.fontSize = h * 0.045f; t.bold = true; t.align = TextAlign::Left; t.backgroundOpacity = 0.75f;
-            t.backgroundColor = {0.09f, 0.10f, 0.12f, 1.0f}; t.backgroundPadding = h * 0.015f; t.shadow = false;
-            tf.positionX = -frameW * 0.25f; tf.positionY = h * 0.33f;
-            if (t.text.empty() || t.text == "Title") t.text = "Name\nRole";
-            break;
-        default:  // Caption: boxed, centred, bottom
-            t.fontSize = h * 0.04f; t.bold = false; t.align = TextAlign::Center; t.backgroundOpacity = 0.6f;
-            t.backgroundColor = {0.0f, 0.0f, 0.0f, 1.0f}; t.backgroundPadding = h * 0.012f; t.shadow = false;
-            tf.positionY = h * 0.4f;
-            if (t.text.empty() || t.text == "Title") t.text = "Caption";
-            break;
-    }
-    c.text = t;
-    c.transform = tf;
-    (void)frameW;
-}
-
 // ---------------------------------------------------------------- content
 
 TextContentSection::TextContentSection(InspectorContext& ctx, QWidget* parent) : InspectorSection(tr("Text"), QStringLiteral("text"), ctx, parent) {
@@ -72,7 +33,10 @@ TextContentSection::TextContentSection(InspectorContext& ctx, QWidget* parent) :
     m_preset = new QComboBox(this);
     m_preset->setFocusPolicy(Qt::NoFocus);
     m_preset->addItem(tr("Apply preset…"));
-    for (const QString& n : textPresetNames()) m_preset->addItem(n);
+    for (const auto& preset : titlePresets()) {
+        m_preset->addItem(tr(preset.name));
+        m_preset->setItemData(m_preset->count() - 1, tr(preset.description), Qt::ToolTipRole);
+    }
     row->addWidget(m_preset, 1);
     layout->addLayout(row);
 
@@ -85,7 +49,7 @@ TextContentSection::TextContentSection(InspectorContext& ctx, QWidget* parent) :
         if (index <= 0) return;
         m_preset->setCurrentIndex(0);
         const int w = m_ctx.project().settings.width, h = m_ctx.project().settings.height;
-        m_ctx.editSelection(tr("Text Preset"), prop::TextPreset, [index, w, h](Clip& c) { applyTextPreset(c, index - 1, w, h); });
+        m_ctx.editSelection(tr("Text Preset"), prop::TextPreset, [index, w, h](Clip& c) { applyTitlePreset(c, index - 1, w, h); });
         m_ctx.endGesture();
     });
 }
