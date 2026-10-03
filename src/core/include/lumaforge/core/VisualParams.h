@@ -27,7 +27,8 @@ struct Crop {
     float right = 0.0f;
     float top = 0.0f;
     float bottom = 0.0f;
-    [[nodiscard]] constexpr bool isIdentity() const noexcept { return left == 0.0f && right == 0.0f && top == 0.0f && bottom == 0.0f; }
+    float feather = 0.0f;     // soft edge width in source pixels, 0 = hard edge
+    [[nodiscard]] constexpr bool isIdentity() const noexcept { return left == 0.0f && right == 0.0f && top == 0.0f && bottom == 0.0f && feather == 0.0f; }
     friend constexpr bool operator==(const Crop&, const Crop&) = default;
 };
 

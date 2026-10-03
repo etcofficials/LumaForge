@@ -15,6 +15,7 @@ public:
     explicit ClipInfoSection(InspectorContext& ctx, QWidget* parent = nullptr);
 
     [[nodiscard]] bool appliesTo(project::ClipKind) const override { return true; }
+    [[nodiscard]] InspectorTab tab() const override { return InspectorTab::Video; }
     void load(const project::Clip& primary, int selectedCount) override;
 
 private:

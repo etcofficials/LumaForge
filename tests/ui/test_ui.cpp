@@ -14,7 +14,9 @@
 #include <QAction>
 #include <QApplication>
 #include <QDir>
+#include <QLabel>
 #include <QLineEdit>
+#include <QTabBar>
 #include <QSettings>
 #include <QWindow>
 #include <qpa/qwindowsysteminterface.h>
@@ -223,6 +225,32 @@ TEST_CASE("shortcut overrides persist, conflicts are detected, reset restores de
     // Tooltips name the command, its shortcut and what it does.
     CHECK(act("toolBlade")->toolTip().contains(QStringLiteral("Blade Tool")));
     CHECK(act("toolBlade")->toolTip().contains(QStringLiteral("B")));
+}
+
+TEST_CASE("inspector: only applicable tabs; multi-selection banner and shared properties") {
+    newProject();
+    focusTimeline();
+    press(Qt::Key_T, Qt::ControlModifier);           // title 1 (5 s)
+    press(Qt::Key_End);                              // playhead to the end of the timeline
+    CHECK(timeline()->playhead() == TimePoint{timeline()->sequenceDuration().ticks});
+    press(Qt::Key_T, Qt::ControlModifier);           // title 2 after it
+    press(Qt::Key_Left);
+    CHECK(timeline()->playhead() < TimePoint{timeline()->sequenceDuration().ticks});
+    auto* tabs = g_window->findChild<QTabBar*>(QStringLiteral("inspectorTabs"));
+    auto* banner = g_window->findChild<QLabel*>(QStringLiteral("inspectorMultiBanner"));
+    CHECK(tabs && banner);
+    if (!tabs || !banner) return;
+    auto offered = [tabs](const QString& name) {
+        for (int i = 0; i < tabs->count(); ++i) if (tabs->tabText(i) == name) return tabs->isTabVisible(i);
+        return false;
+    };
+    CHECK(!banner->isVisible());                     // one title selected
+    CHECK(offered(QStringLiteral("Text")) && offered(QStringLiteral("Transform")));
+    CHECK(!offered(QStringLiteral("Color")) && !offered(QStringLiteral("Audio")) && !offered(QStringLiteral("Speed")));
+    press(Qt::Key_A, Qt::ControlModifier);           // both titles
+    CHECK(banner->isVisible());
+    CHECK(banner->text().contains(QStringLiteral("2 items")));
+    CHECK(offered(QStringLiteral("Text")));
 }
 
 int main(int argc, char** argv) {

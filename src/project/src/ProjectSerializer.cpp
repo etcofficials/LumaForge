@@ -31,7 +31,7 @@ json write(const Transform2D& t) {
     return {{"positionX", t.positionX}, {"positionY", t.positionY}, {"scaleX", t.scaleX}, {"scaleY", t.scaleY}, {"rotation", t.rotation},
             {"opacity", t.opacity}, {"flipH", t.flipH}, {"flipV", t.flipV}};
 }
-json write(const Crop& c) { return {{"left", c.left}, {"right", c.right}, {"top", c.top}, {"bottom", c.bottom}}; }
+json write(const Crop& c) { return {{"left", c.left}, {"right", c.right}, {"top", c.top}, {"bottom", c.bottom}, {"feather", c.feather}}; }
 json write(const ColorAdjust& c) {
     return {{"exposure", c.exposure}, {"brightness", c.brightness}, {"contrast", c.contrast}, {"saturation", c.saturation},
             {"temperature", c.temperature}, {"tint", c.tint}, {"highlights", c.highlights}, {"shadows", c.shadows},
@@ -125,7 +125,7 @@ void read(const json& j, Transform2D& t) {
     get(j, "scaleX", t.scaleX); get(j, "scaleY", t.scaleY);
     get(j, "rotation", t.rotation); get(j, "opacity", t.opacity); get(j, "flipH", t.flipH); get(j, "flipV", t.flipV);
 }
-void read(const json& j, Crop& c) { get(j, "left", c.left); get(j, "right", c.right); get(j, "top", c.top); get(j, "bottom", c.bottom); }
+void read(const json& j, Crop& c) { get(j, "left", c.left); get(j, "right", c.right); get(j, "top", c.top); get(j, "bottom", c.bottom); get(j, "feather", c.feather); }
 void read(const json& j, ColorAdjust& c) {
     get(j, "exposure", c.exposure); get(j, "brightness", c.brightness); get(j, "contrast", c.contrast); get(j, "saturation", c.saturation);
     get(j, "temperature", c.temperature); get(j, "tint", c.tint); get(j, "highlights", c.highlights); get(j, "shadows", c.shadows);

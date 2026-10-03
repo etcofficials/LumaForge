@@ -97,6 +97,7 @@ private:
     void setToolbarGroupVisible(const QString& key, bool visible);
     void ensurePreviewProgram();
     void seekTimeline(TimePoint t);
+    void stepFrames(int frames);
     void applyLoop();
     void importFolderWithDialog();
     void setViewerFullscreen(bool on);

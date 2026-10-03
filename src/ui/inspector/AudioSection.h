@@ -17,6 +17,7 @@ public:
     explicit AudioSection(InspectorContext& ctx, QWidget* parent = nullptr);
 
     [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return kind == project::ClipKind::Audio; }
+    [[nodiscard]] InspectorTab tab() const override { return InspectorTab::Audio; }
     void load(const project::Clip& primary, int selectedCount) override;
 
 private:
@@ -33,6 +34,7 @@ public:
     explicit SpeedSection(InspectorContext& ctx, QWidget* parent = nullptr);
 
     [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return kind == project::ClipKind::Video || kind == project::ClipKind::Audio; }
+    [[nodiscard]] InspectorTab tab() const override { return InspectorTab::Speed; }
     void load(const project::Clip& primary, int selectedCount) override;
 
 private:

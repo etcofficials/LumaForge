@@ -517,13 +517,16 @@ void MainWindow::connectActions() {
         m_importer->importFiles(paths, this);
     });
     connect(tl, &TimelineView::playheadChanged, this, [this](TimePoint t) {
+        m_inspectorPanel->setPlayhead(t);
         m_statusTimecode->setText(formatTimecode(t, m_document->project().settings.frameRate));
     });
+    // The engine's clock drives the playhead only when there is an engine; without
+    // one (no Direct3D device) the timeline playhead is the only position.
     connect(m_playback, &PlaybackController::positionChanged, this, [this](TimePoint t) {
-        if (m_playback->mode() == PlaybackController::Mode::Sequence) m_timelinePanel->view()->setPlayhead(t);
+        if (m_playback->isAvailable() && m_playback->mode() == PlaybackController::Mode::Sequence) m_timelinePanel->view()->setPlayhead(t);
     });
     connect(m_playback, &PlaybackController::programChanged, this, [this] {
-        if (m_playback->mode() == PlaybackController::Mode::Sequence) m_timelinePanel->view()->setPlayhead(m_playback->position());
+        if (m_playback->isAvailable() && m_playback->mode() == PlaybackController::Mode::Sequence) m_timelinePanel->view()->setPlayhead(m_playback->position());
     });
 
     // Edit
@@ -537,12 +540,18 @@ void MainWindow::connectActions() {
     m_actions->connect(ActionId::PlayStop, this, [this] { m_playback->stop(); });
     m_actions->connect(ActionId::ShuttleForward, this, [this] { ensurePreviewProgram(); m_playback->shuttleForward(); });
     m_actions->connect(ActionId::ShuttleReverse, this, [this] { ensurePreviewProgram(); m_playback->shuttleReverse(); });
-    m_actions->connect(ActionId::StepBack, this, [this] { m_playback->stepFrames(-1); });
-    m_actions->connect(ActionId::StepForward, this, [this] { m_playback->stepFrames(1); });
-    m_actions->connect(ActionId::StepBackLarge, this, [this] { m_playback->stepFrames(-10); });
-    m_actions->connect(ActionId::StepForwardLarge, this, [this] { m_playback->stepFrames(10); });
-    m_actions->connect(ActionId::GoToStart, this, [this] { m_playback->goToStart(); });
-    m_actions->connect(ActionId::GoToEnd, this, [this] { m_playback->goToEnd(); });
+    m_actions->connect(ActionId::StepBack, this, [this] { stepFrames(-1); });
+    m_actions->connect(ActionId::StepForward, this, [this] { stepFrames(1); });
+    m_actions->connect(ActionId::StepBackLarge, this, [this] { stepFrames(-10); });
+    m_actions->connect(ActionId::StepForwardLarge, this, [this] { stepFrames(10); });
+    m_actions->connect(ActionId::GoToStart, this, [this] {
+        if (m_playback->mode() == PlaybackController::Mode::Source) m_playback->goToStart();
+        else seekTimeline(TimePoint::zero());
+    });
+    m_actions->connect(ActionId::GoToEnd, this, [this] {
+        if (m_playback->mode() == PlaybackController::Mode::Source) m_playback->goToEnd();
+        else seekTimeline(TimePoint{m_document->project().sequence.duration().ticks});
+    });
     m_actions->connect(ActionId::PrevEdit, this, [this] {
         if (auto t = project::ops::previousEditPoint(m_document->project().sequence, m_timelinePanel->view()->playhead())) seekTimeline(*t);
     });
@@ -694,6 +703,10 @@ void MainWindow::onWorkspaceChanged(Workspace w) {
     for (const auto& [id, ws] : map) if (ws == w) m_actions->action(id)->setChecked(true);
     switch (w) {
         case Workspace::Edit: m_browser->showPage(QStringLiteral("media")); break;
+        case Workspace::Color: m_inspectorPanel->showTab(InspectorTab::Color); break;
+        case Workspace::Audio: m_inspectorPanel->showTab(InspectorTab::Audio); break;
+        case Workspace::Text: m_inspectorPanel->showTab(InspectorTab::Text); break;
+        case Workspace::Effects: m_inspectorPanel->showTab(InspectorTab::Effects); break;
         default: break;
     }
 }
@@ -901,6 +914,16 @@ void MainWindow::showDiagnostics(const QString& tab) {
 void MainWindow::ensurePreviewProgram() {
     // Transport keys act on the timeline unless the source monitor is showing media.
     if (m_playback->mode() == PlaybackController::Mode::None) showSequenceInPreview(m_timelinePanel->view()->playhead());
+}
+
+void MainWindow::stepFrames(int frames) {
+    // The source monitor steps through its media; otherwise the timeline playhead moves
+    // (with or without a playback engine) and the preview follows.
+    if (m_playback->mode() == PlaybackController::Mode::Source) { m_playback->stepFrames(frames); return; }
+    m_playback->pause();
+    const Rational fps = m_document->project().settings.frameRate;
+    const std::int64_t frame = frameIndexAt(m_timelinePanel->view()->playhead(), fps) + frames;
+    seekTimeline(timeOfFrame(std::max<std::int64_t>(0, frame), fps));
 }
 
 void MainWindow::seekTimeline(TimePoint t) {

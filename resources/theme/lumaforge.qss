@@ -336,3 +336,19 @@ QLabel[chip="true"] {
     padding: 1px 8px;
     margin: 0 3px;
 }
+QLabel#inspectorMultiBanner {
+    background: {{bg.elevated}};
+    border-bottom: 1px solid {{border}};
+    color: {{text.secondary}};
+}
+QTabBar#inspectorTabs { background: {{bg.panel}}; }
+QTabBar#inspectorTabs::tab {
+    background: transparent;
+    color: {{text.secondary}};
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 5px 9px;
+    font-size: 8.5pt;
+}
+QTabBar#inspectorTabs::tab:selected { color: {{text.primary}}; border-bottom: 2px solid {{accent}}; }
+QTabBar#inspectorTabs::tab:hover:!selected { color: {{text.primary}}; }

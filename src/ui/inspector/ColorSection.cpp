@@ -46,6 +46,20 @@ ColorSection::ColorSection(InspectorContext& ctx, QWidget* parent) : InspectorSe
         connect(s, &ParamSlider::gestureFinished, this, [this] { m_ctx.endGesture(); });
         m_bindings.push_back({s, d.member});
     }
+    // Copy / paste the whole correction between clips (kept for the session).
+    auto* copy = addHeaderButton(tr("Copy"), tr("Copy this clip's colour correction"));
+    m_paste = addHeaderButton(tr("Paste"), tr("Apply the copied colour correction to the selected clips"));
+    m_paste->setEnabled(clipboard().has_value());
+    connect(copy, &QToolButton::clicked, this, [this] {
+        clipboard() = m_current;
+        m_paste->setEnabled(true);
+    });
+    connect(m_paste, &QToolButton::clicked, this, [this] {
+        if (!clipboard()) return;
+        const ColorAdjust value = *clipboard();
+        m_ctx.editSelection(tr("Paste Color"), prop::ResetGroup, [value](Clip& c) { c.color = value; });
+        m_ctx.endGesture();
+    });
     auto* reset = addHeaderButton(tr("Reset"), tr("Reset all colour adjustments"));
     connect(reset, &QToolButton::clicked, this, [this] {
         m_ctx.editSelection(tr("Reset Color"), prop::ResetGroup, [](Clip& c) { c.color = ColorAdjust{}; });
@@ -53,8 +67,15 @@ ColorSection::ColorSection(InspectorContext& ctx, QWidget* parent) : InspectorSe
     });
 }
 
+std::optional<ColorAdjust>& ColorSection::clipboard() {
+    static std::optional<ColorAdjust> value;
+    return value;
+}
+
 void ColorSection::load(const Clip& c, int) {
     LoadGuard guard(m_loading);
+    m_current = c.color;
+    m_paste->setEnabled(clipboard().has_value());
     for (const auto& b : m_bindings) b.slider->setValue(c.color.*(b.member));
     setSubtitle(c.color.isIdentity() ? QString() : tr("adjusted"));
 }

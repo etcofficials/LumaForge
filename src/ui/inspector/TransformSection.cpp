@@ -34,6 +34,27 @@ void bindCrop(ParamSlider* s, InspectorContext& ctx, const bool& loading, const 
     });
     QObject::connect(s, &ParamSlider::gestureFinished, s, [&ctx] { ctx.endGesture(); });
 }
+// Picture size of a visual clip in source pixels (display orientation).
+bool sourceSize(const Project& p, const Clip& c, double& w, double& h) {
+    if (c.kind == ClipKind::Text) { w = p.settings.width; h = p.settings.height; return true; }
+    const MediaItem* m = p.findMedia(c.media);
+    if (!m || !m->info.video || m->info.video->width <= 0 || m->info.video->height <= 0) return false;
+    w = m->info.video->width;
+    h = m->info.video->height;
+    if (std::abs(m->info.video->rotationDegrees) % 180 == 90) std::swap(w, h);
+    return true;
+}
+
+QToolButton* smallButton(QWidget* parent, const QString& text, const QString& tip) {
+    auto* b = new QToolButton(parent);
+    b->setText(text);
+    b->setToolTip(tip);
+    b->setFocusPolicy(Qt::NoFocus);
+    b->setFixedHeight(22);
+    b->setMinimumWidth(30);
+    return b;
+}
+
 QToolButton* flipButton(QWidget* parent, const QString& text, const QString& tip) {
     auto* b = new QToolButton(parent);
     b->setText(text);
@@ -93,9 +114,41 @@ TransformSection::TransformSection(InspectorContext& ctx, QWidget* parent) : Ins
     flipRow->addStretch(1);
     f->addRow(tr("Flip"), flips);
 
-    bindFloat(m_posX, ctx, m_loading, tr("Position"), prop::PositionX, &Transform2D::positionX);
-    bindFloat(m_posY, ctx, m_loading, tr("Position"), prop::PositionY, &Transform2D::positionY);
-    bindFloat(m_rotation, ctx, m_loading, tr("Rotation"), prop::Rotation, &Transform2D::rotation);
+    // Size presets relative to the frame, and picture-in-picture corners.
+    auto* fitRow = new QWidget(this);
+    auto* fitLayout = new QHBoxLayout(fitRow);
+    fitLayout->setContentsMargins(0, 0, 0, 0);
+    fitLayout->setSpacing(4);
+    auto* fitB = smallButton(fitRow, tr("Fit"), tr("Fit: whole picture inside the frame (scale 100%)"));
+    auto* fillB = smallButton(fitRow, tr("Fill"), tr("Fill: cover the whole frame, cropping the overflow"));
+    auto* origB = smallButton(fitRow, tr("1:1"), tr("Original size: one source pixel per frame pixel"));
+    for (auto* b : {fitB, fillB, origB}) fitLayout->addWidget(b);
+    fitLayout->addStretch(1);
+    f->addRow(tr("Size"), fitRow);
+    connect(fitB, &QToolButton::clicked, this, [this] { applyFit(Fit::Fit); });
+    connect(fillB, &QToolButton::clicked, this, [this] { applyFit(Fit::Fill); });
+    connect(origB, &QToolButton::clicked, this, [this] { applyFit(Fit::Original); });
+
+    auto* pipRow = new QWidget(this);
+    auto* pipLayout = new QHBoxLayout(pipRow);
+    pipLayout->setContentsMargins(0, 0, 0, 0);
+    pipLayout->setSpacing(4);
+    const std::pair<Corner, std::pair<const char*, const char*>> corners[] = {
+        {Corner::TopLeft, {"↖", "Picture-in-picture: top left"}}, {Corner::TopRight, {"↗", "Picture-in-picture: top right"}},
+        {Corner::BottomLeft, {"↙", "Picture-in-picture: bottom left"}}, {Corner::BottomRight, {"↘", "Picture-in-picture: bottom right"}},
+        {Corner::Center, {"◎", "Picture-in-picture: centred"}}};
+    for (const auto& [corner, label] : corners) {
+        auto* b = smallButton(pipRow, QString::fromUtf8(label.first), tr(label.second) + tr(" (35% size, 4% margin)"));
+        const Corner cc = corner;
+        connect(b, &QToolButton::clicked, this, [this, cc] { applyPip(cc); });
+        pipLayout->addWidget(b);
+    }
+    pipLayout->addStretch(1);
+    f->addRow(tr("PiP"), pipRow);
+
+    bindFloat(m_posX, m_ctx, m_loading, tr("Position"), prop::PositionX, &Transform2D::positionX);
+    bindFloat(m_posY, m_ctx, m_loading, tr("Position"), prop::PositionY, &Transform2D::positionY);
+    bindFloat(m_rotation, m_ctx, m_loading, tr("Rotation"), prop::Rotation, &Transform2D::rotation);
 
     connect(m_scale, &ParamSlider::valueEdited, this, [this](double v) {
         if (m_loading) return;
@@ -159,6 +212,49 @@ TransformSection::TransformSection(InspectorContext& ctx, QWidget* parent) : Ins
     emit m_uniform->toggled(true);
 }
 
+void TransformSection::applyFit(Fit fit) {
+    const Project& p = m_ctx.project();
+    const QString text = fit == Fit::Fit ? tr("Fit to Frame") : fit == Fit::Fill ? tr("Fill Frame") : tr("Original Size");
+    m_ctx.editSelection(text, prop::Preset, [&p, fit](Clip& c) {
+        double w = 0, h = 0;
+        if (!sourceSize(p, c, w, h)) return;
+        const double fw = p.settings.width, fh = p.settings.height;
+        const double base = std::min(fw / w, fh / h);   // the "fit" scale the compositor applies
+        double s = 1.0;
+        if (fit == Fit::Fill) s = std::max(fw / w, fh / h) / base;
+        else if (fit == Fit::Original) s = 1.0 / base;
+        c.transform.scaleX = c.transform.scaleY = static_cast<float>(s);
+        c.transform.positionX = c.transform.positionY = 0.0f;
+    });
+    m_ctx.endGesture();
+}
+
+void TransformSection::applyPip(Corner corner) {
+    const Project& p = m_ctx.project();
+    m_ctx.editSelection(tr("Picture in Picture"), prop::Preset, [&p, corner](Clip& c) {
+        double w = 0, h = 0;
+        if (!sourceSize(p, c, w, h)) return;
+        const double fw = p.settings.width, fh = p.settings.height;
+        const double base = std::min(fw / w, fh / h);
+        constexpr double kScale = 0.35;
+        const double dispW = w * base * kScale, dispH = h * base * kScale;
+        const double margin = fw * 0.04;
+        const double dx = fw / 2 - margin - dispW / 2, dy = fh / 2 - margin - dispH / 2;
+        double x = 0, y = 0;
+        switch (corner) {
+            case Corner::TopLeft: x = -dx; y = -dy; break;
+            case Corner::TopRight: x = dx; y = -dy; break;
+            case Corner::BottomLeft: x = -dx; y = dy; break;
+            case Corner::BottomRight: x = dx; y = dy; break;
+            case Corner::Center: break;
+        }
+        c.transform.scaleX = c.transform.scaleY = static_cast<float>(kScale);
+        c.transform.positionX = static_cast<float>(x);
+        c.transform.positionY = static_cast<float>(y);
+    });
+    m_ctx.endGesture();
+}
+
 void TransformSection::load(const Clip& c, int) {
     LoadGuard guard(m_loading);
     const auto& t = c.transform;
@@ -192,10 +288,19 @@ CropSection::CropSection(InspectorContext& ctx, QWidget* parent) : InspectorSect
     f->addRow(tr("Right"), m_right);
     f->addRow(tr("Top"), m_top);
     f->addRow(tr("Bottom"), m_bottom);
-    bindCrop(m_left, ctx, m_loading, tr("Crop"), prop::CropLeft, &Crop::left);
-    bindCrop(m_right, ctx, m_loading, tr("Crop"), prop::CropRight, &Crop::right);
-    bindCrop(m_top, ctx, m_loading, tr("Crop"), prop::CropTop, &Crop::top);
-    bindCrop(m_bottom, ctx, m_loading, tr("Crop"), prop::CropBottom, &Crop::bottom);
+    bindCrop(m_left, m_ctx, m_loading, tr("Crop"), prop::CropLeft, &Crop::left);
+    bindCrop(m_right, m_ctx, m_loading, tr("Crop"), prop::CropRight, &Crop::right);
+    bindCrop(m_top, m_ctx, m_loading, tr("Crop"), prop::CropTop, &Crop::top);
+    bindCrop(m_bottom, m_ctx, m_loading, tr("Crop"), prop::CropBottom, &Crop::bottom);
+    m_feather = new ParamSlider(0, 200, 0, 0, this);
+    m_feather->setSuffix(QStringLiteral(" px"));
+    m_feather->setToolTip(tr("Soft edge inside the crop, in source pixels"));
+    f->addRow(tr("Feather"), m_feather);
+    connect(m_feather, &ParamSlider::valueEdited, this, [this](double v) {
+        if (m_loading) return;
+        m_ctx.editSelection(tr("Crop Feather"), prop::CropFeather, [v](Clip& c) { c.crop.feather = static_cast<float>(v); });
+    });
+    connect(m_feather, &ParamSlider::gestureFinished, this, [this] { m_ctx.endGesture(); });
     auto* reset = addHeaderButton(tr("Reset"), tr("Remove the crop"));
     connect(reset, &QToolButton::clicked, this, [this] {
         m_ctx.editSelection(tr("Reset Crop"), prop::ResetGroup, [](Clip& c) { c.crop = Crop{}; });
@@ -209,6 +314,7 @@ void CropSection::load(const Clip& c, int) {
     m_right->setValue(c.crop.right * 100.0);
     m_top->setValue(c.crop.top * 100.0);
     m_bottom->setValue(c.crop.bottom * 100.0);
+    m_feather->setValue(c.crop.feather);
 }
 
 }  // namespace lf::ui

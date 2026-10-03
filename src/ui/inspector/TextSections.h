@@ -19,6 +19,7 @@ class TextContentSection final : public InspectorSection {
 public:
     explicit TextContentSection(InspectorContext& ctx, QWidget* parent = nullptr);
     [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return kind == project::ClipKind::Text; }
+    [[nodiscard]] InspectorTab tab() const override { return InspectorTab::Text; }
     void load(const project::Clip& primary, int selectedCount) override;
 
 private:
@@ -32,6 +33,7 @@ class TypographySection final : public InspectorSection {
 public:
     explicit TypographySection(InspectorContext& ctx, QWidget* parent = nullptr);
     [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return kind == project::ClipKind::Text; }
+    [[nodiscard]] InspectorTab tab() const override { return InspectorTab::Text; }
     void load(const project::Clip& primary, int selectedCount) override;
 
 private:
@@ -53,6 +55,7 @@ public:
     enum class Part { Fill, Outline, Shadow, Background };
     TextStyleSection(Part part, InspectorContext& ctx, QWidget* parent = nullptr);
     [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return kind == project::ClipKind::Text; }
+    [[nodiscard]] InspectorTab tab() const override { return InspectorTab::Text; }
     void load(const project::Clip& primary, int selectedCount) override;
 
 private:

@@ -13,7 +13,7 @@ cbuffer LayerConstants : register(b0) {
     int4     mode;        // x: 0 = NV12 (t0=Y R8, t1=UV RG8), 1 = I420 (t0,t1,t2 R8), 2 = BGRA (t0)
                           // y: flags  1 grayscale, 2 sepia, 4 vignette, 8 input premultiplied, 16 skip colour math,
                           //           32 blur, 64 sharpen        z: 1 flip H, 2 flip V
-    float4   misc;        // vignetteAmount, texelW, texelH
+    float4   misc;        // vignetteAmount, texelW, texelH, crop feather (source pixels)
     float4   fx;          // grayscale mix, sepia mix, blur radius (texels), sharpen amount
 };
 
@@ -138,5 +138,13 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
 
     float opacity = adjust0.x;
     float a = alpha * opacity;
+    if (misc.w > 0.0) {
+        // Feathered crop: fade to transparent over misc.w source pixels inside each crop edge.
+        float2 px = float2(1.0 / misc.y, 1.0 / misc.z);
+        float2 fromLo = (uv - uvRect.xy) * px;
+        float2 fromHi = (uvRect.zw - uv) * px;
+        float edge = min(min(fromLo.x, fromLo.y), min(fromHi.x, fromHi.y));
+        a *= saturate(edge / misc.w);
+    }
     return float4(rgb * a, a);
 }

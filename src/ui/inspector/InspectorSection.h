@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lumaforge/core/Time.h"
 #include "lumaforge/project/Project.h"
 #include "ui/widgets/CollapsibleSection.h"
 
@@ -17,7 +18,8 @@ class InspectorContext {
 public:
     virtual ~InspectorContext() = default;
     using ClipEdit = std::function<void(project::Clip&)>;
-    // Applies `fn` to every selected clip the section applies to.
+    // Applies `fn` to every selected clip (a section's own context narrows this
+    // to the clips the section applies to).
     virtual void editSelection(const QString& undoText, int propertyId, const ClipEdit& fn) = 0;
     virtual void endGesture() = 0;
     // Structural edits (duration changes etc.): the builder receives the
@@ -25,7 +27,12 @@ public:
     using EditBuilder = std::function<project::SequenceEdit(project::Document&, const std::vector<project::ClipId>&)>;
     virtual void pushEdit(const QString& undoText, const EditBuilder& build) = 0;
     [[nodiscard]] virtual const project::Project& project() const = 0;
+    // Timeline playhead (keyframes are set at the playhead).
+    [[nodiscard]] virtual TimePoint playhead() const = 0;
 };
+
+// Inspector tabs; a section lives in exactly one.
+enum class InspectorTab { Video, Transform, Color, Effects, Audio, Speed, Text, Transition };
 
 // One collapsible group of controls. `load` refreshes the widgets from the
 // primary clip (first selected) without emitting edits; `appliesTo` decides
@@ -34,9 +41,10 @@ class InspectorSection : public CollapsibleSection {
     Q_OBJECT
 public:
     InspectorSection(const QString& title, const QString& key, InspectorContext& ctx, QWidget* parent = nullptr)
-        : CollapsibleSection(title, key, parent), m_ctx(ctx) {}
+        : CollapsibleSection(title, key, parent), m_proxy(ctx, *this), m_ctx(m_proxy) {}
 
     [[nodiscard]] virtual bool appliesTo(project::ClipKind kind) const = 0;
+    [[nodiscard]] virtual InspectorTab tab() const = 0;
     virtual void load(const project::Clip& primary, int selectedCount) = 0;
 
 protected:
@@ -46,6 +54,27 @@ protected:
         ~LoadGuard() { f = false; }
         bool& f;
     };
+
+    // Forwards to the panel but only lets the edit touch clips this section
+    // applies to: a Transform change never modifies a selected audio clip.
+    class SectionContext final : public InspectorContext {
+    public:
+        SectionContext(InspectorContext& inner, const InspectorSection& section) : m_inner(inner), m_section(section) {}
+        void editSelection(const QString& undoText, int propertyId, const ClipEdit& fn) override {
+            const InspectorSection* s = &m_section;
+            m_inner.editSelection(undoText, propertyId, [s, &fn](project::Clip& c) { if (s->appliesTo(c.kind)) fn(c); });
+        }
+        void endGesture() override { m_inner.endGesture(); }
+        void pushEdit(const QString& undoText, const EditBuilder& build) override { m_inner.pushEdit(undoText, build); }
+        [[nodiscard]] const project::Project& project() const override { return m_inner.project(); }
+        [[nodiscard]] TimePoint playhead() const override { return m_inner.playhead(); }
+
+    private:
+        InspectorContext& m_inner;
+        const InspectorSection& m_section;
+    };
+
+    SectionContext m_proxy;
     InspectorContext& m_ctx;
     bool m_loading = false;
 };
@@ -63,6 +92,7 @@ enum : int {
     TextShadowOffsetY, TextShadowBlur, TextBackground, TextBackgroundColor, TextBackgroundOpacity, TextPadding, TextPreset,
     Volume, Mute, FadeIn, FadeOut,
     Speed,
+    CropFeather, Pan, Preset,
     ResetGroup = 900,
 };
 }

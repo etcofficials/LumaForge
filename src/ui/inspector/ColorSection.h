@@ -2,7 +2,10 @@
 
 #include "ui/inspector/InspectorSection.h"
 
+#include <optional>
 #include <vector>
+
+class QToolButton;
 
 namespace lf::ui {
 
@@ -15,6 +18,7 @@ public:
     explicit ColorSection(InspectorContext& ctx, QWidget* parent = nullptr);
 
     [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return kind == project::ClipKind::Video || kind == project::ClipKind::Image; }
+    [[nodiscard]] InspectorTab tab() const override { return InspectorTab::Color; }
     void load(const project::Clip& primary, int selectedCount) override;
 
 private:
@@ -23,6 +27,9 @@ private:
         float ColorAdjust::*member;
     };
     std::vector<Binding> m_bindings;
+    QToolButton* m_paste = nullptr;
+    ColorAdjust m_current;
+    static std::optional<ColorAdjust>& clipboard();
 };
 
 }  // namespace lf::ui

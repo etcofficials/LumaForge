@@ -16,6 +16,7 @@ public:
     explicit TransformSection(InspectorContext& ctx, QWidget* parent = nullptr);
 
     [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return project::isVisualClip(kind); }
+    [[nodiscard]] InspectorTab tab() const override { return InspectorTab::Transform; }
     void load(const project::Clip& primary, int selectedCount) override;
 
 private:
@@ -29,6 +30,11 @@ private:
     QCheckBox* m_uniform;
     QToolButton* m_flipH;
     QToolButton* m_flipV;
+
+    enum class Fit { Fit, Fill, Original };
+    enum class Corner { TopLeft, TopRight, BottomLeft, BottomRight, Center };
+    void applyFit(Fit fit);
+    void applyPip(Corner corner);
 };
 
 // Crop from each edge, as a percentage of the source.
@@ -38,6 +44,7 @@ public:
     explicit CropSection(InspectorContext& ctx, QWidget* parent = nullptr);
 
     [[nodiscard]] bool appliesTo(project::ClipKind kind) const override { return kind == project::ClipKind::Video || kind == project::ClipKind::Image; }
+    [[nodiscard]] InspectorTab tab() const override { return InspectorTab::Video; }
     void load(const project::Clip& primary, int selectedCount) override;
 
 private:
@@ -45,6 +52,7 @@ private:
     ParamSlider* m_right;
     ParamSlider* m_top;
     ParamSlider* m_bottom;
+    ParamSlider* m_feather;
 };
 
 }  // namespace lf::ui

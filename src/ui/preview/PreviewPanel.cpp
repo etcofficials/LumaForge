@@ -184,10 +184,12 @@ void PreviewPanel::updateProgram() {
         case PlaybackController::Mode::Sequence: m_sourceLabel->setText(tr("Timeline")); break;
         default: m_sourceLabel->clear(); break;
     }
-    const bool enabled = has;
-    for (auto id : {ActionId::PlayPause, ActionId::Play, ActionId::Pause, ActionId::PlayStop, ActionId::ShuttleForward, ActionId::ShuttleReverse,
-                    ActionId::StepBack, ActionId::StepForward, ActionId::StepBackLarge, ActionId::StepForwardLarge, ActionId::GoToStart, ActionId::GoToEnd})
-        m_actions.setEnabled(id, enabled);
+    for (auto id : {ActionId::PlayPause, ActionId::Play, ActionId::Pause, ActionId::PlayStop, ActionId::ShuttleForward, ActionId::ShuttleReverse})
+        m_actions.setEnabled(id, has);
+    // Frame stepping moves the timeline playhead even without a preview program.
+    const bool navigable = has || m_playback.mode() != PlaybackController::Mode::Source;
+    for (auto id : {ActionId::StepBack, ActionId::StepForward, ActionId::StepBackLarge, ActionId::StepForwardLarge, ActionId::GoToStart, ActionId::GoToEnd})
+        m_actions.setEnabled(id, navigable);
     updateTime();
 }
 

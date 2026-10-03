@@ -1,18 +1,24 @@
 #include "ui/panels/InspectorPanel.h"
 
 #include "lumaforge/project/TimelineCommands.h"
+#include "lumaforge/project/TimelineOps.h"
+#include "ui/inspector/AudioSection.h"
 #include "ui/inspector/ClipInfoSection.h"
-#include "ui/inspector/TransformSection.h"
 #include "ui/inspector/ColorSection.h"
 #include "ui/inspector/EffectsSection.h"
 #include "ui/inspector/TextSections.h"
-#include "ui/inspector/AudioSection.h"
+#include "ui/inspector/TransformSection.h"
 #include "ui/widgets/EmptyState.h"
 #include "ui/widgets/PanelHeader.h"
 
+#include <QLabel>
 #include <QScrollArea>
+#include <QSettings>
 #include <QStackedWidget>
+#include <QTabBar>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 namespace lf::ui {
 
@@ -35,7 +41,44 @@ InspectorPanel::InspectorPanel(Document& doc, QWidget* parent) : QWidget(parent)
                              tr("Select a clip in the timeline to edit its properties."), this);
     m_stack->addWidget(m_empty);
 
-    m_scroll = new QScrollArea(this);
+    m_content = new QWidget(this);
+    auto* contentLayout = new QVBoxLayout(m_content);
+    contentLayout->setContentsMargins(0, 0, 0, 0);
+    contentLayout->setSpacing(0);
+    m_multiBanner = new QLabel(m_content);
+    m_multiBanner->setObjectName(QStringLiteral("inspectorMultiBanner"));
+    m_multiBanner->setWordWrap(true);
+    m_multiBanner->setContentsMargins(10, 6, 10, 6);
+    m_multiBanner->hide();
+    contentLayout->addWidget(m_multiBanner);
+    auto* infoHost = new QWidget(m_content);
+    m_infoLayout = new QVBoxLayout(infoHost);
+    m_infoLayout->setContentsMargins(0, 0, 0, 0);
+    m_infoLayout->setSpacing(0);
+    contentLayout->addWidget(infoHost);
+
+    m_tabs = new QTabBar(m_content);
+    m_tabs->setObjectName(QStringLiteral("inspectorTabs"));
+    m_tabs->setDrawBase(false);
+    m_tabs->setExpanding(false);
+    m_tabs->setUsesScrollButtons(true);
+    m_tabs->setElideMode(Qt::ElideNone);
+    m_tabs->setFocusPolicy(Qt::NoFocus);
+    m_tabOrder = {InspectorTab::Video, InspectorTab::Transform, InspectorTab::Color, InspectorTab::Effects,
+                  InspectorTab::Audio, InspectorTab::Speed, InspectorTab::Text, InspectorTab::Transition};
+    for (InspectorTab t : m_tabOrder) {
+        const int i = m_tabs->addTab(tabName(t));
+        m_tabs->setTabData(i, static_cast<int>(t));
+    }
+    contentLayout->addWidget(m_tabs);
+    connect(m_tabs, &QTabBar::currentChanged, this, [this](int i) {
+        if (i < 0) return;
+        m_currentTab = static_cast<InspectorTab>(m_tabs->tabData(i).toInt());
+        QSettings().setValue(QStringLiteral("inspector/tab"), static_cast<int>(m_currentTab));
+        applyTabVisibility();
+    });
+
+    m_scroll = new QScrollArea(m_content);
     m_scroll->setWidgetResizable(true);
     m_scroll->setFrameShape(QFrame::NoFrame);
     m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -45,11 +88,13 @@ InspectorPanel::InspectorPanel(Document& doc, QWidget* parent) : QWidget(parent)
     m_sectionsLayout->setSpacing(0);
     m_sectionsLayout->addStretch(1);
     m_scroll->setWidget(host);
-    m_stack->addWidget(m_scroll);
+    contentLayout->addWidget(m_scroll, 1);
+    m_stack->addWidget(m_content);
     m_stack->setCurrentWidget(m_empty);
     layout->addWidget(m_stack, 1);
 
-    addSection(new ClipInfoSection(*this, host));
+    m_infoSection = new ClipInfoSection(*this, infoHost);
+    m_infoLayout->addWidget(m_infoSection);
     addSection(new TextContentSection(*this, host));
     addSection(new TypographySection(*this, host));
     addSection(new TextStyleSection(TextStyleSection::Part::Fill, *this, host));
@@ -63,10 +108,25 @@ InspectorPanel::InspectorPanel(Document& doc, QWidget* parent) : QWidget(parent)
     addSection(new AudioSection(*this, host));
     addSection(new SpeedSection(*this, host));
 
+    m_currentTab = static_cast<InspectorTab>(QSettings().value(QStringLiteral("inspector/tab"), static_cast<int>(InspectorTab::Transform)).toInt());
     m_listenerToken = m_doc.addListener([this](const Change& c) { onDocumentChange(c); });
 }
 
 InspectorPanel::~InspectorPanel() { m_doc.removeListener(m_listenerToken); }
+
+QString InspectorPanel::tabName(InspectorTab tab) {
+    switch (tab) {
+        case InspectorTab::Video: return tr("Video");
+        case InspectorTab::Transform: return tr("Transform");
+        case InspectorTab::Color: return tr("Color");
+        case InspectorTab::Effects: return tr("Effects");
+        case InspectorTab::Audio: return tr("Audio");
+        case InspectorTab::Speed: return tr("Speed");
+        case InspectorTab::Text: return tr("Text");
+        case InspectorTab::Transition: return tr("Transition");
+    }
+    return {};
+}
 
 void InspectorPanel::addSection(InspectorSection* section) {
     m_sections.push_back(section);
@@ -82,37 +142,107 @@ void InspectorPanel::setSelection(const std::vector<ClipId>& ids) {
     rebuild();
 }
 
-void InspectorPanel::rebuild() {
+void InspectorPanel::setPlayhead(TimePoint t) {
+    if (t == m_playhead) return;
+    m_playhead = t;
+    emit playheadDependentChanged();
+}
+
+std::vector<std::vector<const Clip*>> InspectorPanel::items() const {
     const auto& seq = m_doc.project().sequence;
-    const Clip* primary = nullptr;
-    int count = 0;
-    for (auto id : m_selection) if (const Clip* c = seq.findClip(id)) { if (!primary) primary = c; ++count; }
-    if (!primary) {
+    std::vector<std::vector<const Clip*>> out;
+    std::vector<ClipId> seen;
+    for (auto id : m_selection) {
+        if (std::find(seen.begin(), seen.end(), id) != seen.end()) continue;
+        const Clip* c = seq.findClip(id);
+        if (!c) continue;
+        std::vector<const Clip*> item{c};
+        seen.push_back(id);
+        // A selected linked partner belongs to the same item.
+        if (isValid(c->link) && std::find(m_selection.begin(), m_selection.end(), c->link) != m_selection.end()) {
+            if (const Clip* p = seq.findClip(c->link)) { item.push_back(p); seen.push_back(p->id); }
+        }
+        out.push_back(std::move(item));
+    }
+    return out;
+}
+
+bool InspectorPanel::sectionApplies(const InspectorSection* s, const std::vector<std::vector<const Clip*>>& its) const {
+    if (its.empty()) return false;
+    // Shown only when every selected item has a clip the section edits.
+    for (const auto& item : its) {
+        const bool any = std::any_of(item.begin(), item.end(), [&](const Clip* c) { return s->appliesTo(c->kind); });
+        if (!any) return false;
+    }
+    return true;
+}
+
+void InspectorPanel::rebuild() {
+    const auto its = items();
+    if (its.empty()) {
         m_stack->setCurrentWidget(m_empty);
         for (auto* s : m_sections) s->hide();
         return;
     }
-    m_stack->setCurrentWidget(m_scroll);
-    for (auto* s : m_sections) {
-        // Shown when any selected clip is of a kind the section handles (a
-        // video clip with its linked audio selected gets the Audio section).
-        const Clip* target = nullptr;
-        for (auto id : m_selection) if (const Clip* c = seq.findClip(id); c && s->appliesTo(c->kind)) { target = c; break; }
-        s->setVisible(target != nullptr);
-        if (target) s->load(*target, count);
+    m_stack->setCurrentWidget(m_content);
+    const int count = static_cast<int>(its.size());
+    m_multiBanner->setVisible(count > 1);
+    if (count > 1) {
+        m_multiBanner->setText(tr("<b>%n items selected</b> — only properties they all share are shown; changes apply to all of them.", nullptr, count));
     }
+    // Clip info: the primary clip (first selected).
+    m_infoSection->load(*its.front().front(), count);
+    for (auto* s : m_sections) {
+        const bool applies = sectionApplies(s, its);
+        s->setProperty("lfApplies", applies);
+        if (!applies) continue;
+        for (const auto& item : its)
+            for (const Clip* c : item)
+                if (s->appliesTo(c->kind)) { s->load(*c, count); goto loaded; }
+    loaded:;
+    }
+    applyTabVisibility();
+}
+
+void InspectorPanel::applyTabVisibility() {
+    // Offer only the tabs that have at least one applicable section.
+    std::vector<InspectorTab> offered;
+    for (InspectorTab t : m_tabOrder) {
+        const bool any = std::any_of(m_sections.begin(), m_sections.end(), [&](InspectorSection* s) { return s->tab() == t && s->property("lfApplies").toBool(); });
+        if (any) offered.push_back(t);
+    }
+    const QSignalBlocker block(m_tabs);
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        const auto t = static_cast<InspectorTab>(m_tabs->tabData(i).toInt());
+        m_tabs->setTabVisible(i, std::find(offered.begin(), offered.end(), t) != offered.end());
+    }
+    if (!offered.empty() && std::find(offered.begin(), offered.end(), m_currentTab) == offered.end()) {
+        // Keep the user's tab when possible; otherwise the first useful one (Text for titles, Audio for sound...).
+        m_currentTab = offered.front();
+        if (std::find(offered.begin(), offered.end(), InspectorTab::Transform) != offered.end() && offered.front() == InspectorTab::Video) m_currentTab = InspectorTab::Transform;
+    }
+    for (int i = 0; i < m_tabs->count(); ++i) if (static_cast<InspectorTab>(m_tabs->tabData(i).toInt()) == m_currentTab) m_tabs->setCurrentIndex(i);
+    m_tabs->setVisible(offered.size() > 1);
+    for (auto* s : m_sections) s->setVisible(s->property("lfApplies").toBool() && s->tab() == m_currentTab);
+}
+
+void InspectorPanel::showTab(InspectorTab tab) {
+    m_currentTab = tab;
+    applyTabVisibility();
 }
 
 void InspectorPanel::reload() {
     if (m_applying) return;   // our own edit: widgets already show the value
-    const auto& seq = m_doc.project().sequence;
-    const Clip* primary = nullptr;
-    int count = 0;
-    for (auto id : m_selection) if (const Clip* c = seq.findClip(id)) { if (!primary) primary = c; ++count; }
-    if (!primary) { rebuild(); return; }
+    const auto its = items();
+    if (its.empty()) { rebuild(); return; }
+    const int count = static_cast<int>(its.size());
+    m_infoSection->load(*its.front().front(), count);
     for (auto* s : m_sections) {
-        if (!s->isVisible()) continue;
-        for (auto id : m_selection) if (const Clip* c = seq.findClip(id); c && s->appliesTo(c->kind)) { s->load(*c, count); break; }
+        if (!s->property("lfApplies").toBool()) continue;
+        for (const auto& item : its)
+            for (const Clip* c : item)
+                if (s->appliesTo(c->kind)) { s->load(*c, count); goto done; }
+    done:;
     }
 }
 
@@ -134,13 +264,18 @@ void InspectorPanel::onDocumentChange(const Change& change) {
 }
 
 bool InspectorPanel::hasSection(const QString& key) const {
-    for (auto* s : m_sections) if (s->sectionKey() == key && !s->isHidden()) return true;
-    return false;
+    for (auto* s : m_sections) if (s->sectionKey() == key && s->property("lfApplies").toBool()) return true;
+    return key == QStringLiteral("clip") && !m_selection.empty();
 }
 
 bool InspectorPanel::revealSection(const QString& key) {
+    if (key == QStringLiteral("clip")) {
+        m_infoSection->setExpanded(true);
+        return !m_selection.empty();
+    }
     for (auto* s : m_sections) {
-        if (s->sectionKey() != key || s->isHidden()) continue;
+        if (s->sectionKey() != key || !s->property("lfApplies").toBool()) continue;
+        showTab(s->tab());
         s->setExpanded(true);
         m_scroll->ensureWidgetVisible(s, 0, 0);
         return true;

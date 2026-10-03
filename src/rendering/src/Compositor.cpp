@@ -253,6 +253,7 @@ void Compositor::drawLayer(const Layer& layer, int frameW, int frameH, int targe
     k.misc[0] = layer.effects.vignette;
     k.misc[1] = 1.0f / tex.width();
     k.misc[2] = 1.0f / tex.height();
+    k.misc[3] = layer.crop.feather;   // source pixels
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (SUCCEEDED(ctx->Map(m_constants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
