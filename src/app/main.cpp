@@ -1,5 +1,6 @@
 // LumaForge entry point: wires logging, the GPU device, hardware detection and
 // the main window together. No editing logic lives here.
+#include "CrashHandler.h"
 #include "lumaforge/core/Log.h"
 #include "lumaforge/core/StringUtil.h"
 #include "lumaforge/core/Version.h"
@@ -59,11 +60,16 @@ int main(int argc, char* argv[]) {
     lf::ui::AppPaths::initialise();
 
     auto logSink = initLogging(lf::ui::AppPaths::path(lf::ui::AppPaths::Kind::Logs));
+    lf::app::installCrashHandler(QDir::toNativeSeparators(lf::ui::AppPaths::path(lf::ui::AppPaths::Kind::Logs)).toStdWString());
     const auto sys = lf::diag::querySystem();
     LF_LOG_INFO("app", "LumaForge {} ({}) starting", lf::version::string, lf::version::buildType);
     LF_LOG_INFO("app", "{} | {} cores | {} RAM | {} {} | Qt {} | {}", sys.cpu.brand, sys.cpu.logicalProcessors,
                 lf::formatBytes(sys.memory.totalPhysical), sys.os.name, sys.os.version, qVersion(), sys.build.ffmpegVersion);
 
+#ifndef NDEBUG
+    // Debug builds: --crash-test faults on purpose to verify the minidump path.
+    if (app.arguments().contains(QStringLiteral("--crash-test"))) *static_cast<volatile int*>(nullptr) = 1;
+#endif
     lf::ui::Theme::apply(app);
 
     // One D3D11 device for the whole application. Failure is not fatal: the

@@ -23,7 +23,8 @@ cmake --preset debug ; cmake --build --preset debug
 - PowerShell 5.1: save `.ps1` files as UTF-8 **with BOM** and ASCII punctuation only; `$Args` is a
   reserved automatic variable; native tools that log to stderr trip `$ErrorActionPreference='Stop'`.
 - Toolchain check: `tools/diagnose-toolchain.ps1` (all checks must pass before blaming the code).
-- Logs: `build/<preset>/bin/logs/lumaforge.log` (share-readable). Settings: `build/<preset>/bin/LumaForge/LumaForge.ini`.
+- Logs: `G:\LumaForgeData\Logs\lumaforge.log` (share-readable); fatal crashes leave `crash-*.dmp` there
+  (open with cdb + the build's PDBs; debug builds can test the path with `--crash-test`). Settings: `build/<preset>/bin/LumaForge/LumaForge.ini`.
 - `build/<preset>/bin` is self-contained (Qt + plugins + CRT + FFmpeg deployed by `cmake/LumaForgeDeploy.cmake`);
   the exe must launch from a shell WITHOUT the env script. Exit 0xC0000135 = a DLL is missing from bin.
   `--software-preview` forces the QPainter preview path (GPU stays the default).
