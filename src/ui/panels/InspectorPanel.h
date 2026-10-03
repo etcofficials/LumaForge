@@ -54,7 +54,11 @@ public slots:
 signals:
     void seekRequested(lf::TimePoint t);   // keyframe navigation
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
 private:
+    void updateBannerHeight();
     void addSection(InspectorSection* section);
     void rebuild();
     void reload();

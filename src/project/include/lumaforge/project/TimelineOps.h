@@ -133,6 +133,16 @@ std::optional<Duration> mediaDuration(const Project& project, const Clip& clip);
 // locked tracks are skipped). Empty when nothing applies.
 SequenceEdit addEffect(const Sequence& seq, const std::vector<ClipId>& ids, const Effect& effect);
 
+// Sets (or with nullopt removes) the transition at one edge of a visual clip.
+// At the end, a clip touching it on the track receives it as its transitionIn
+// (one transition per cut); otherwise it is the clip's transitionOut. The
+// duration is clamped to what the clips allow. Empty when nothing changes.
+SequenceEdit setTransition(const Sequence& seq, ClipId id, bool atStart, std::optional<Transition> transition);
+// Adds `transition` at the edge of each clip nearest to `near` (visual clips on unlocked tracks).
+SequenceEdit addTransition(const Sequence& seq, const std::vector<ClipId>& ids, TimePoint near, Transition transition);
+// The transition currently at that edge (looking at the touching clip for the end), if any.
+[[nodiscard]] std::optional<Transition> transitionAt(const Sequence& seq, ClipId id, bool atStart);
+
 // The sequence's clips as they will be once `edit` executes (for previews).
 std::vector<Clip> applied(const Sequence& seq, const SequenceEdit& edit);
 

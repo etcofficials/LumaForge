@@ -1,6 +1,7 @@
 add_library(lf_project STATIC
     include/lumaforge/project/Ids.h
     include/lumaforge/project/Animation.h
+    include/lumaforge/project/Transitions.h
     include/lumaforge/project/MediaItem.h
     include/lumaforge/project/Sequence.h
     include/lumaforge/project/Project.h
@@ -12,6 +13,7 @@ add_library(lf_project STATIC
     include/lumaforge/project/TitlePresets.h
     src/Sequence.cpp
     src/Animation.cpp
+    src/Transitions.cpp
     src/Document.cpp
     src/MediaCommands.cpp
     src/TimelineCommands.cpp

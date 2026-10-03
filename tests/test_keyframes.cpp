@@ -181,7 +181,7 @@ TEST_CASE("keyframes reach the render snapshot (transform, crop) and audio gain"
     CHECK(playback::SequenceProgram::gainAt(a, sec(1)) == 0.0f);
 }
 
-TEST_CASE("serializer v5: keyframes round-trip; unknown properties are dropped") {
+TEST_CASE("serializer v5+: keyframes round-trip; unknown properties are dropped") {
     Project p;
     Clip t = textClip(0, 5);
     t.id = ClipId{7};
@@ -194,7 +194,7 @@ TEST_CASE("serializer v5: keyframes round-trip; unknown properties are dropped")
     auto loaded = serializer::fromJson(json, "");
     CHECK(static_cast<bool>(loaded));
     if (!loaded) return;
-    CHECK(loaded->fileVersion == 5);
+    CHECK(loaded->fileVersion == serializer::kFormatVersion);
     const Clip* c = loaded->project.sequence.findClip(ClipId{7});
     CHECK(c && c->animation == t.animation);
 

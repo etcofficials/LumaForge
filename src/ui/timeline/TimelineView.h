@@ -100,6 +100,8 @@ public slots:
     void addTextClipAt(lf::project::TrackId track, lf::TimePoint at, int preset = 0);
     // Appends an effect to the given clips (visual, unlocked); returns how many changed.
     int addEffect(const std::vector<lf::project::ClipId>& ids, lf::EffectType type);
+    // Adds a transition on each selected visual clip's edge nearest the playhead; returns how many clips changed.
+    int addTransition(lf::project::TransitionType type, lf::Duration duration);
     void nudgeSelection(int frames);
     void moveSelectionToPlayhead();
     void trimSelectionToPlayhead(bool start);
@@ -122,6 +124,7 @@ signals:
     void userSeeked(lf::TimePoint time, bool scrubbing);   // the user moved the playhead (preview must seek)
     void viewChanged();                         // zoom or scroll changed
     void selectionChanged();
+    void transitionClicked(lf::project::ClipId owner);   // a transition box was clicked (owner clip selected)
     void clipboardChanged();
     void toolChanged(lf::ui::EditTool tool);
     void clipDoubleClicked(lf::project::ClipId id);
@@ -289,6 +292,16 @@ private:
     EffectType m_dropEffect = EffectType::Count;          // effect being dragged from the browser
     project::ClipId m_dropEffectTarget = project::ClipId::Invalid;
     [[nodiscard]] std::vector<project::ClipId> effectTargets(project::ClipId under) const;
+    std::optional<project::Transition> m_dropTransition;   // transition being dragged from the browser
+    project::ClipId m_dropTransitionClip = project::ClipId::Invalid;
+    bool m_dropTransitionAtStart = true;
+    struct TransitionBox {
+        QRectF rect;
+        project::ClipId owner;
+        QString name;
+    };
+    [[nodiscard]] std::vector<TransitionBox> transitionBoxes() const;
+    void paintTransitions(QPainter& p);
     TimePoint m_dropTime;
 };
 

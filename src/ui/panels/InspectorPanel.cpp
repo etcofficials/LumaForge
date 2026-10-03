@@ -7,6 +7,7 @@
 #include "ui/inspector/ColorSection.h"
 #include "ui/inspector/EffectsSection.h"
 #include "ui/inspector/TextSections.h"
+#include "ui/inspector/TransitionSection.h"
 #include "ui/inspector/TransformSection.h"
 #include "ui/widgets/EmptyState.h"
 #include "ui/widgets/PanelHeader.h"
@@ -107,6 +108,7 @@ InspectorPanel::InspectorPanel(Document& doc, QWidget* parent) : QWidget(parent)
     addSection(new EffectsSection(*this, host));
     addSection(new AudioSection(*this, host));
     addSection(new SpeedSection(*this, host));
+    addSection(new TransitionSection(*this, host));
 
     m_currentTab = static_cast<InspectorTab>(QSettings().value(QStringLiteral("inspector/tab"), static_cast<int>(InspectorTab::Transform)).toInt());
     m_listenerToken = m_doc.addListener([this](const Change& c) { onDocumentChange(c); });
@@ -203,6 +205,7 @@ void InspectorPanel::rebuild() {
     m_multiBanner->setVisible(count > 1);
     if (count > 1) {
         m_multiBanner->setText(tr("<b>%n items selected</b> — only properties they all share are shown; changes apply to all of them.", nullptr, count));
+        updateBannerHeight();
     }
     // Clip info: the primary clip (first selected).
     m_infoSection->load(*its.front().front(), count);
@@ -242,6 +245,20 @@ void InspectorPanel::applyTabVisibility() {
     for (int i = 0; i < m_tabs->count(); ++i) if (static_cast<InspectorTab>(m_tabs->tabData(i).toInt()) == m_currentTab) m_tabs->setCurrentIndex(i);
     m_tabs->setVisible(offered.size() > 1);
     for (auto* s : m_sections) s->setVisible(s->property("lfApplies").toBool() && s->tab() == m_currentTab);
+}
+
+void InspectorPanel::updateBannerHeight() {
+    // The stacked widget above does not pass height-for-width down, so a
+    // wrapped label would be squeezed to one line: size it explicitly.
+    if (m_multiBanner->isVisible() || !m_multiBanner->text().isEmpty()) {
+        const int w = std::max(100, m_content->width());
+        m_multiBanner->setFixedHeight(m_multiBanner->heightForWidth(w));
+    }
+}
+
+void InspectorPanel::resizeEvent(QResizeEvent* e) {
+    QWidget::resizeEvent(e);
+    updateBannerHeight();
 }
 
 void InspectorPanel::showTab(InspectorTab tab) {

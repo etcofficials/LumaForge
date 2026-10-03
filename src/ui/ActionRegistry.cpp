@@ -146,6 +146,7 @@ const ActionDef kActions[] = {
     {ActionId::ClipSpeed,       "clipSpeed",       "S&peed…",              nullptr,       C::Clip, Shortcut{CTRL | Qt::Key_R}, {}, "Show the speed controls of the selected clip", false, false},
     {ActionId::ClipProperties,  "clipProperties",  "P&roperties",          nullptr,       C::Clip, {}, {}, "Show the selected clip in the Inspector", false, false},
     {ActionId::ClipRevealInMedia, "clipRevealInMedia", "Reveal in &Media", nullptr,       C::Clip, {}, {}, "Select the clip's source file in the Media panel", false, false},
+    {ActionId::ClipAddTransition, "clipAddTransition", "Add &Transition", "transition", C::Clip, Shortcut{CTRL | SHIFT | Qt::Key_D}, {}, "Add a 1 s cross dissolve at the selected clips' edge nearest the playhead", false, false},
     {ActionId::TimelineAddText, "timelineAddText", "Add &Text",            "text",        C::Text, Shortcut{CTRL | Qt::Key_T}, {}, "Add a text clip at the playhead on the top video track"},
 
     // ---- Viewer

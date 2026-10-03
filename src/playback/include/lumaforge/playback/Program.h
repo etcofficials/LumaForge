@@ -24,6 +24,7 @@ struct VideoLayerRequest {
     EffectParams effects;
     bool fitToFrame = true;
     std::optional<TextParams> text;   // generated text layer (path is empty)
+    std::optional<ColorRgba> solid;   // generated full-frame colour layer (path is empty)
 };
 
 // What to mix for one audio-bearing clip at a given program time.

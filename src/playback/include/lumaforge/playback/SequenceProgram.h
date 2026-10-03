@@ -31,13 +31,22 @@ private:
         project::Clip clip;
         std::string path;
         bool isImage = false;
+        Duration mediaDuration;   // source times are clamped into the media (transition handles)
     };
+    struct WindowEntry {
+        TimePoint start, end;
+        int from = -1, to = -1;   // indices into the track's entries, -1 = nothing
+        project::Transition transition;
+    };
+    [[nodiscard]] VideoLayerRequest layerFor(const VisualEntry& e, TimePoint t) const;
+    void transitionLayers(const std::vector<VisualEntry>& entries, const WindowEntry& w, TimePoint t, std::vector<VideoLayerRequest>& out) const;
     struct AudioEntry {
         project::Clip clip;
         std::string path;
     };
     // Visual clips grouped per video track, bottom-up; each list sorted by start.
     std::vector<std::vector<VisualEntry>> m_videoTracks;
+    std::vector<std::vector<WindowEntry>> m_windows;   // per video track, parallel to m_videoTracks
     std::vector<AudioEntry> m_audioClips;
     std::vector<std::string> m_paths;
     Duration m_duration;

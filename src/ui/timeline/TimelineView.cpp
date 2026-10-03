@@ -678,6 +678,57 @@ int TimelineView::addEffect(const std::vector<ClipId>& ids, EffectType type) {
     return n;
 }
 
+int TimelineView::addTransition(TransitionType type, Duration duration) {
+    const auto& seq = m_doc.project().sequence;
+    SequenceEdit edit = ops::addTransition(seq, m_selection, m_playhead, Transition{type, duration});
+    const int n = static_cast<int>(edit.modified.size());
+    if (n) commit(tr("Add %1").arg(QString::fromUtf8(transitionInfo(type).name)), std::move(edit));
+    return n;
+}
+
+std::vector<TimelineView::TransitionBox> TimelineView::transitionBoxes() const {
+    // Drawn (and clickable) in the bottom band of the lane, so the clip edges'
+    // trim handles above stay reachable.
+    std::vector<TransitionBox> out;
+    const auto& seq = m_doc.project().sequence;
+    for (const auto& lane : m_lanes) {
+        if (lane.kind != TrackKind::Video) continue;
+        const double band = std::max(10.0, lane.height * 0.36);
+        for (const auto& w : transitionWindows(seq.clipsOnTrack(lane.id))) {
+            const double x0 = xFromTicks(w.start.ticks), x1 = xFromTicks(w.end.ticks);
+            QRectF r(x0, lane.y + lane.height - band - 3, std::max(6.0, x1 - x0), band);
+            out.push_back({r, w.owner->id, QString::fromUtf8(transitionInfo(w.transition.type).name)});
+        }
+    }
+    return out;
+}
+
+void TimelineView::paintTransitions(QPainter& p) {
+    const auto& pal = Theme::palette();
+    p.save();
+    p.setClipRect(laneArea());
+    p.setRenderHint(QPainter::Antialiasing, true);
+    for (const auto& box : transitionBoxes()) {
+        if (box.rect.right() < headerWidth() || box.rect.left() > width()) continue;
+        QPainterPath path;
+        path.addRoundedRect(box.rect, 3, 3);
+        p.fillPath(path, QColor(255, 255, 255, isSelected(box.owner) ? 70 : 45));
+        p.setPen(QPen(isSelected(box.owner) ? pal.accent : QColor(255, 255, 255, 140), 1));
+        p.drawPath(path);
+        // The classic transition glyph: a diagonal across the box.
+        p.setPen(QPen(QColor(255, 255, 255, 110), 1));
+        p.drawLine(box.rect.bottomLeft() + QPointF(2, -2), box.rect.topRight() + QPointF(-2, 2));
+        if (box.rect.width() > 70 && box.rect.height() >= 12) {
+            p.setPen(pal.textPrimary);
+            QFont f = font();
+            f.setPointSizeF(f.pointSizeF() - 1.5);
+            p.setFont(f);
+            p.drawText(box.rect.adjusted(5, 0, -5, 0), Qt::AlignCenter, p.fontMetrics().elidedText(box.name, Qt::ElideRight, static_cast<int>(box.rect.width() - 10)));
+        }
+    }
+    p.restore();
+}
+
 std::vector<ClipId> TimelineView::effectTargets(ClipId under) const {
     // Dropping on a selected clip applies to the whole selection; otherwise to that clip.
     if (!isValid(under)) return {};
@@ -850,6 +901,15 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
             seekTo(pos.x());
             e->accept();
             return;
+        }
+        if (m_tool == EditTool::Select) {
+            for (const auto& box : transitionBoxes()) {
+                if (!box.rect.contains(pos)) continue;
+                setSelection({box.owner});
+                emit transitionClicked(box.owner);
+                e->accept();
+                return;
+            }
         }
         const Hit hit = hitTest(pos);
         const Lane* lane = laneAt(pos.y());
@@ -1226,6 +1286,18 @@ void TimelineView::dragEnterEvent(QDragEnterEvent* e) {
     m_dropIsFiles = false;
     m_dropEffect = EffectType::Count;
     m_dropEffectTarget = ClipId::Invalid;
+    m_dropTransition.reset();
+    m_dropTransitionClip = ClipId::Invalid;
+    if (e->mimeData()->hasFormat(QString::fromLatin1(mime::kTransition))) {
+        const QList<QByteArray> parts = e->mimeData()->data(QString::fromLatin1(mime::kTransition)).split(';');
+        const TransitionType type = transitionTypeFromId(parts.value(0).toStdString());
+        if (type == TransitionType::Count) return;
+        const Ticks d = parts.size() > 1 ? parts[1].toLongLong() : kDefaultTransitionDuration.ticks;
+        m_dropTransition = Transition{type, Duration{d > 0 ? d : kDefaultTransitionDuration.ticks}};
+        e->acceptProposedAction();
+        dragMoveEvent(static_cast<QDragMoveEvent*>(e));
+        return;
+    }
     if (e->mimeData()->hasFormat(QString::fromLatin1(mime::kEffect))) {
         m_dropEffect = effectTypeFromId(e->mimeData()->data(QString::fromLatin1(mime::kEffect)).toStdString());
         if (m_dropEffect == EffectType::Count) return;
@@ -1269,6 +1341,24 @@ void TimelineView::dragEnterEvent(QDragEnterEvent* e) {
 
 void TimelineView::dragMoveEvent(QDragMoveEvent* e) {
     const QPoint pos = e->position().toPoint();
+    if (m_dropTransition) {
+        // Transitions land on the edge of the visual clip nearest the cursor.
+        const ClipId before = m_dropTransitionClip;
+        const bool beforeEdge = m_dropTransitionAtStart;
+        m_dropTransitionClip = ClipId::Invalid;
+        const Hit hit = pos.x() >= headerWidth() ? hitTest(pos) : Hit{};
+        const auto& seq = m_doc.project().sequence;
+        if (const Clip* c = seq.findClip(hit.clip); c && isVisualClip(c->kind)) {
+            if (const Track* t = seq.findTrack(c->track); t && !t->locked) {
+                m_dropTransitionClip = c->id;
+                m_dropTransitionAtStart = ticksFromX(pos.x()) < c->start.ticks + c->duration.ticks / 2;
+            }
+        }
+        if (isValid(m_dropTransitionClip)) e->acceptProposedAction();
+        else e->ignore();
+        if (before != m_dropTransitionClip || beforeEdge != m_dropTransitionAtStart) update(lanesRect());
+        return;
+    }
     if (m_dropEffect != EffectType::Count) {
         // Effects land on the visual clip under the cursor.
         const ClipId before = m_dropEffectTarget;
@@ -1331,12 +1421,27 @@ void TimelineView::dragLeaveEvent(QDragLeaveEvent*) {
     m_dropIsFiles = false;
     m_dropEffect = EffectType::Count;
     m_dropEffectTarget = ClipId::Invalid;
+    m_dropTransition.reset();
+    m_dropTransitionClip = ClipId::Invalid;
     m_snapGuide.reset();
     update();
 }
 
 void TimelineView::dropEvent(QDropEvent* e) {
     dragMoveEvent(static_cast<QDragMoveEvent*>(e));
+    if (m_dropTransition) {
+        const Transition t = *m_dropTransition;
+        const ClipId target = m_dropTransitionClip;
+        const bool atStart = m_dropTransitionAtStart;
+        dragLeaveEvent(nullptr);
+        if (!isValid(target)) { e->ignore(); return; }
+        e->acceptProposedAction();
+        SequenceEdit edit = ops::setTransition(m_doc.project().sequence, target, atStart, t);
+        if (!edit.modified.empty()) commit(tr("Add %1").arg(QString::fromUtf8(transitionInfo(t.type).name)), std::move(edit));
+        setSelection({target});
+        setFocus(Qt::OtherFocusReason);
+        return;
+    }
     if (m_dropEffect != EffectType::Count) {
         const EffectType type = m_dropEffect;
         const auto targets = effectTargets(m_dropEffectTarget);
@@ -1423,6 +1528,7 @@ void TimelineView::paintEvent(QPaintEvent* e) {
     if (e->rect().intersects(lanes)) {
         paintTracks(p, lanes, ticks);
         paintClips(p, lanes);
+        paintTransitions(p);
         paintDropGhosts(p);
     }
     if (e->rect().intersects(ruler)) paintRuler(p, ruler, ticks);
@@ -1797,6 +1903,17 @@ void TimelineView::paintClip(QPainter& p, const Clip& c, const QRectF& r, bool s
 
 void TimelineView::paintDropGhosts(QPainter& p) {
     const auto& pal = Theme::palette();
+    if (isValid(m_dropTransitionClip)) {
+        // Where the dragged transition will go: a bar on the chosen edge.
+        if (const Clip* c = m_doc.project().sequence.findClip(m_dropTransitionClip)) {
+            const QRectF r = clipRect(*c);
+            const double x = m_dropTransitionAtStart ? r.left() : r.right();
+            p.save();
+            p.setClipRect(laneArea());
+            p.fillRect(QRectF(x - 3, r.top(), 6, r.height()), pal.accent);
+            p.restore();
+        }
+    }
     if (isValid(m_dropEffectTarget)) {
         // Outline every clip the dragged effect will be applied to.
         p.save();

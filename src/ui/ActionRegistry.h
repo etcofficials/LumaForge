@@ -36,7 +36,7 @@ enum class ActionId {
     TimelineZoomIn, TimelineZoomOut, TimelineZoomFit, TimelineSnap, TimelineAddText, TimelineExpand,
     TimelineAddVideoTrack, TimelineAddAudioTrack,
     TrackAddAbove, TrackAddBelow, TrackDuplicate, TrackDelete, TrackRename, TrackMoveUp, TrackMoveDown, TrackLock, TrackMute, TrackSolo,
-    ClipSpeed, ClipProperties, ClipRevealInMedia,
+    ClipSpeed, ClipProperties, ClipRevealInMedia, ClipAddTransition,
     // Viewer
     ViewerZoomFit, ViewerZoom25, ViewerZoom50, ViewerZoom100, ViewerZoom200, ViewerFullscreen,
     QualityAuto, QualityFull, QualityHalf, QualityQuarter, QualityEighth,

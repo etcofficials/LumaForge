@@ -88,6 +88,7 @@ TimelinePanel::TimelinePanel(project::Document& doc, ActionRegistry& actions, QW
     actions.connect(ActionId::EditPasteOverwrite, this, [this] { m_view->pasteOverwrite(); });
     actions.connect(ActionId::EditDuplicate, this, [this] { m_view->duplicateSelection(); });
     actions.connect(ActionId::TimelineAddText, this, [this] { m_view->addTextClip(); });
+    actions.connect(ActionId::ClipAddTransition, this, [this] { m_view->addTransition(project::TransitionType::CrossDissolve, project::kDefaultTransitionDuration); });
     actions.connect(ActionId::ClipNudgeLeft, this, [this] { m_view->nudgeSelection(-1); });
     actions.connect(ActionId::ClipNudgeRight, this, [this] { m_view->nudgeSelection(1); });
     actions.connect(ActionId::ClipNudgeLeftLarge, this, [this] { m_view->nudgeSelection(-10); });
@@ -236,7 +237,8 @@ void TimelinePanel::updateActionState() {
     m_actions.action(ActionId::ClipEnable)->setChecked(hasSelection && m_view->selectionEnabled());
     m_actions.setEnabled(ActionId::AudioMuteClip, m_view->selectionHasAudio());
     m_actions.action(ActionId::AudioMuteClip)->setChecked(m_view->selectionAudioMuted());
-    for (auto id : {ActionId::VideoTransform, ActionId::VideoCrop, ActionId::VideoColor, ActionId::VideoEffects}) m_actions.setEnabled(id, m_view->selectionHasVisual());
+    for (auto id : {ActionId::VideoTransform, ActionId::VideoCrop, ActionId::VideoColor, ActionId::VideoEffects, ActionId::ClipAddTransition})
+        m_actions.setEnabled(id, m_view->selectionHasVisual());
     m_actions.setEnabled(ActionId::ClipTrimStartToPlayhead, m_view->canTrimToPlayhead());
     m_actions.setEnabled(ActionId::ClipTrimEndToPlayhead, m_view->canTrimToPlayhead());
     m_actions.setEnabled(ActionId::ClipLift, seq.hasInOut() && hasClips);
@@ -277,6 +279,7 @@ void TimelinePanel::showContextMenu(const QPoint& globalPos, project::ClipId cli
         menu.addAction(m_actions.action(ActionId::ClipTrimEndToPlayhead));
         menu.addAction(m_actions.action(ActionId::ClipEnable));
         menu.addAction(m_actions.action(ActionId::ClipSpeed));
+        menu.addAction(m_actions.action(ActionId::ClipAddTransition));
         menu.addSeparator();
         menu.addAction(m_actions.action(ActionId::ClipRevealInMedia));
         menu.addAction(m_actions.action(ActionId::ClipProperties));

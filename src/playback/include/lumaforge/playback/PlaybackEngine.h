@@ -103,6 +103,7 @@ private:
     void pruneReaders();
     // Rasterised text layers, keyed by content hash; bounded LRU.
     std::shared_ptr<render::FrameTexture> textTextureFor(const TextParams& text, int frameW, int frameH);
+    std::shared_ptr<render::FrameTexture> solidTextureFor(const ColorRgba& color);
     void notifyPosition(TimePoint t, bool force);
     void wake() { m_cv.notify_all(); }
     TimePoint clockNow() const;
@@ -142,6 +143,7 @@ private:
     std::unique_ptr<render::TextRasterizer> m_text;     // created lazily on the render thread
     bool m_textUnavailable = false;
     std::unordered_map<std::uint64_t, TextEntry> m_textCache;
+    std::unordered_map<std::uint32_t, std::shared_ptr<render::FrameTexture>> m_solidCache;   // BGRA colour -> 16x16 texture
     std::uint64_t m_textUseCounter = 0;
     std::vector<VideoLayerRequest> m_layerRequests;
     std::vector<VideoLayerRequest> m_prerollRequests;

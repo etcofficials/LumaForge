@@ -22,10 +22,12 @@ qt_add_library(lf_ui STATIC
     inspector/TextSections.h inspector/TextSections.cpp
     inspector/AudioSection.h inspector/AudioSection.cpp
     inspector/KeyframeControls.h inspector/KeyframeControls.cpp
+    inspector/TransitionSection.h inspector/TransitionSection.cpp
     widgets/ColorButton.h   widgets/ColorButton.cpp
     panels/MediaPanel.h     panels/MediaPanel.cpp
     panels/EffectsBrowserPanel.h panels/EffectsBrowserPanel.cpp
     panels/TitlesBrowserPanel.h panels/TitlesBrowserPanel.cpp
+    panels/TransitionsBrowserPanel.h panels/TransitionsBrowserPanel.cpp
     DragMime.h
     panels/InspectorPanel.h panels/InspectorPanel.cpp
     preview/PreviewWidget.h preview/PreviewWidget.cpp
@@ -114,4 +116,5 @@ qt_add_resources(lf_ui "lf_ui_resources"
         "${CMAKE_SOURCE_DIR}/resources/icons/folder.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/filter.svg"
         "${CMAKE_SOURCE_DIR}/resources/icons/effects.svg"
+        "${CMAKE_SOURCE_DIR}/resources/icons/transition.svg"
 )

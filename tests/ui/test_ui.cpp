@@ -435,6 +435,42 @@ TEST_CASE("keyframes from the inspector: diamond adds a key, edits at another ti
     CHECK(!diamond->isEnabled());
 }
 
+TEST_CASE("transitions: Ctrl+Shift+D adds a dissolve at the cut; inspector changes type; undo") {
+    newProject();
+    focusTimeline();
+    press(Qt::Key_T, Qt::ControlModifier);                 // title A at 0..5 s
+    press(Qt::Key_End);
+    press(Qt::Key_T, Qt::ControlModifier);                 // title B at 5..10 s, selected
+    const auto& seq = g_window->document().project().sequence;
+    CHECK(seq.clips.size() == 2);
+    if (seq.clips.size() != 2) return;
+    const project::Clip* b = nullptr;
+    for (const auto& c : seq.clips) if (c.start == TimePoint::fromSeconds(5)) b = &c;
+    CHECK(b != nullptr);
+    if (!b) return;
+    const project::ClipId bid = b->id;
+    // Playhead is at B's start (the cut): the transition goes across the cut, on B.
+    press(Qt::Key_D, Qt::ControlModifier | Qt::ShiftModifier);
+    b = seq.findClip(bid);
+    CHECK(b->transitionIn.has_value() && b->transitionIn->type == project::TransitionType::CrossDissolve);
+    auto* startType = g_window->findChild<QComboBox*>(QStringLiteral("transitionStartType"));
+    CHECK(startType != nullptr);
+    if (!startType) return;
+    CHECK(startType->currentText() == QStringLiteral("Cross Dissolve"));
+    const int wipe = startType->findText(QStringLiteral("Wipe Left"));
+    startType->setCurrentIndex(wipe);
+    emit startType->activated(wipe);
+    pump();
+    CHECK(seq.findClip(bid)->transitionIn->type == project::TransitionType::WipeLeft);
+    focusTimeline();
+    press(Qt::Key_Z, Qt::ControlModifier);
+    CHECK(seq.findClip(bid)->transitionIn->type == project::TransitionType::CrossDissolve);
+    press(Qt::Key_Z, Qt::ControlModifier);
+    CHECK(!seq.findClip(bid)->transitionIn.has_value());
+    press(Qt::Key_Y, Qt::ControlModifier);
+    CHECK(seq.findClip(bid)->transitionIn.has_value());
+}
+
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     // Isolated settings + data folder so the tests never touch the user's configuration.

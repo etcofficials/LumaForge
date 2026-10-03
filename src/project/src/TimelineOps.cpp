@@ -36,6 +36,7 @@ Clip rightPiece(const Clip& c, TimePoint time, ClipId newId) {
     right.sourceIn = c.sourceTimeAt(time);
     right.duration = c.end() - time;
     right.audio.fadeIn = Duration::zero();
+    right.transitionIn.reset();   // the new cut starts as a plain cut
     return right;
 }
 
@@ -43,6 +44,7 @@ Clip leftPiece(const Clip& c, TimePoint time) {
     Clip left = c;
     left.duration = time - c.start;
     left.audio.fadeOut = Duration::zero();
+    left.transitionOut.reset();
     return left;
 }
 
@@ -808,6 +810,58 @@ SequenceEdit addEffect(const Sequence& seq, const std::vector<ClipId>& ids, cons
         edit.modify(std::move(n));
     }
     return edit;
+}
+
+namespace {
+// The clip that stores the transition for an edge, and whether it is its In side.
+std::pair<const Clip*, bool> transitionOwner(const Sequence& seq, const Clip& c, bool atStart) {
+    if (atStart) return {&c, true};
+    const auto onTrack = seq.clipsOnTrack(c.track);
+    if (const Clip* next = touchingNeighbour(onTrack, c, false); next && isVisualClip(next->kind)) return {next, true};
+    return {&c, false};
+}
+}  // namespace
+
+SequenceEdit setTransition(const Sequence& seq, ClipId id, bool atStart, std::optional<Transition> transition) {
+    SequenceEdit edit;
+    const Clip* c = seq.findClip(id);
+    if (!c || !isVisualClip(c->kind)) return edit;
+    if (const Track* t = seq.findTrack(c->track); !t || t->locked) return edit;
+    const auto [owner, inSide] = transitionOwner(seq, *c, atStart);
+    if (transition) {
+        const Duration limit = maxTransitionDuration(seq.clipsOnTrack(owner->track), *owner, inSide);
+        transition->duration = Duration{std::clamp<Ticks>(transition->duration.ticks, 1, std::max<Ticks>(1, limit.ticks))};
+    }
+    const std::optional<Transition>& current = inSide ? owner->transitionIn : owner->transitionOut;
+    if (current == transition) return edit;
+    Clip n = *owner;
+    (inSide ? n.transitionIn : n.transitionOut) = transition;
+    edit.modify(std::move(n));
+    return edit;
+}
+
+SequenceEdit addTransition(const Sequence& seq, const std::vector<ClipId>& ids, TimePoint near, Transition transition) {
+    SequenceEdit edit;
+    for (auto id : ids) {
+        const Clip* c = seq.findClip(id);
+        if (!c || !isVisualClip(c->kind)) continue;
+        const bool atStart = std::llabs(near.ticks - c->start.ticks) <= std::llabs(c->end().ticks - near.ticks);
+        SequenceEdit one = setTransition(seq, id, atStart, transition);
+        for (auto& m : one.modified) {
+            // Two selected clips sharing a cut: the cut gets one transition.
+            bool dup = false;
+            for (const auto& e : edit.modified) dup |= e.id == m.id;
+            if (!dup) edit.modify(std::move(m));
+        }
+    }
+    return edit;
+}
+
+std::optional<Transition> transitionAt(const Sequence& seq, ClipId id, bool atStart) {
+    const Clip* c = seq.findClip(id);
+    if (!c) return std::nullopt;
+    const auto [owner, inSide] = transitionOwner(seq, *c, atStart);
+    return inSide ? owner->transitionIn : owner->transitionOut;
 }
 
 std::vector<Clip> applied(const Sequence& seq, const SequenceEdit& edit) { return effectiveClips(seq, edit); }

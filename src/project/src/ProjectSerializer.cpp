@@ -142,6 +142,22 @@ void read(const json& j, ColorAdjust& c) {
     get(j, "temperature", c.temperature); get(j, "tint", c.tint); get(j, "highlights", c.highlights); get(j, "shadows", c.shadows);
     get(j, "gamma", c.gamma); get(j, "vibrance", c.vibrance); get(j, "hue", c.hue);
 }
+std::optional<Transition> readTransition(const json& clip, const char* key) {
+    auto it = clip.find(key);
+    if (it == clip.end() || !it->is_object()) return std::nullopt;
+    std::string id;
+    get(*it, "type", id);
+    const TransitionType type = transitionTypeFromId(id);
+    if (type == TransitionType::Count) return std::nullopt;   // from a newer version: dropped, not fatal
+    Transition t;
+    t.type = type;
+    Ticks d = t.duration.ticks;
+    get(*it, "duration", d);
+    if (d <= 0) return std::nullopt;
+    t.duration = Duration{d};
+    return t;
+}
+
 void readAnimation(const json& j, std::vector<KeyTrack>& tracks) {
     tracks.clear();
     if (!j.is_array()) return;
@@ -267,6 +283,8 @@ std::string toJson(const Project& project, const std::string& projectDir) {
                   {"link", raw(c.link)}, {"transform", write(c.transform)}, {"crop", write(c.crop)}, {"color", write(c.color)},
                   {"effects", write(c.effects)}, {"audio", write(c.audio)}, {"enabled", c.enabled}};
         if (!c.animation.empty()) j["animation"] = writeAnimation(c.animation);
+        if (c.transitionIn) j["transitionIn"] = {{"type", transitionInfo(c.transitionIn->type).id}, {"duration", c.transitionIn->duration.ticks}};
+        if (c.transitionOut) j["transitionOut"] = {{"type", transitionInfo(c.transitionOut->type).id}, {"duration", c.transitionOut->duration.ticks}};
         if (c.kind == ClipKind::Text) j["text"] = write(c.text);
         clips.push_back(std::move(j));
     }
@@ -355,6 +373,8 @@ Result<LoadResult> fromJson(const std::string& text, const std::string& projectD
                 if (auto s = j.find("color"); s != j.end()) read(*s, c.color);
                 if (auto s = j.find("effects"); s != j.end()) read(*s, c.effects);
                 if (auto s = j.find("animation"); s != j.end()) readAnimation(*s, c.animation);
+                c.transitionIn = readTransition(j, "transitionIn");
+                c.transitionOut = readTransition(j, "transitionOut");
                 if (auto s = j.find("audio"); s != j.end()) read(*s, c.audio);
                 if (auto s = j.find("text"); s != j.end()) read(*s, c.text);
                 // Drop clips that cannot be placed; never load an inconsistent sequence.

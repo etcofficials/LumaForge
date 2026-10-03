@@ -5,6 +5,7 @@
 #include "lumaforge/core/VisualParams.h"
 #include "lumaforge/project/Animation.h"
 #include "lumaforge/project/Ids.h"
+#include "lumaforge/project/Transitions.h"
 
 #include <optional>
 #include <string>
@@ -59,6 +60,8 @@ struct Clip {
     AudioParams audio;
     TextParams text;
     std::vector<KeyTrack> animation;   // keyframed properties (see Animation.h); empty = static
+    std::optional<Transition> transitionIn;    // visual clips only; see Transitions.h
+    std::optional<Transition> transitionOut;
 
     [[nodiscard]] constexpr TimePoint end() const noexcept { return start + duration; }
     [[nodiscard]] constexpr TimeRange range() const noexcept { return {start, duration}; }
@@ -104,6 +107,32 @@ void animatedTransform(const Clip& c, TimePoint source, Transform2D& transform, 
 [[nodiscard]] TimePoint animationTime(const Clip& c, TimePoint sequenceTime) noexcept;
 // Every key time of every property, sorted, unique (media time).
 [[nodiscard]] std::vector<TimePoint> keyTimes(const Clip& c);
+
+// ---- transitions (Transitions.cpp)
+// One effective transition on a track: [start, end) in sequence time. `from`
+// is the outgoing clip and `to` the incoming one; either may be null (a
+// transition from / to whatever lies underneath). `owner` carries the
+// Transition (transitionIn when atStart, else transitionOut).
+struct TransitionWindow {
+    TimePoint start;
+    TimePoint end;
+    const Clip* from = nullptr;
+    const Clip* to = nullptr;
+    const Clip* owner = nullptr;
+    bool atStart = true;
+    Transition transition;
+    [[nodiscard]] double progressAt(TimePoint t) const noexcept {
+        const Ticks len = end.ticks - start.ticks;
+        return len > 0 ? static_cast<double>(t.ticks - start.ticks) / static_cast<double>(len) : 1.0;
+    }
+};
+// Windows for the clips of one track, given sorted by start. Durations are
+// clamped so a window never extends beyond either clip it involves.
+[[nodiscard]] std::vector<TransitionWindow> transitionWindows(const std::vector<const Clip*>& trackClipsSorted);
+// Longest duration a transition at that edge of the clip can have.
+[[nodiscard]] Duration maxTransitionDuration(const std::vector<const Clip*>& trackClipsSorted, const Clip& clip, bool atStart);
+// The clip touching `clip`'s start (atStart) or end on its track, if any.
+[[nodiscard]] const Clip* touchingNeighbour(const std::vector<const Clip*>& trackClipsSorted, const Clip& clip, bool atStart);
 
 // Tracks are stored in display order, top to bottom (V2, V1, A1, A2).
 // Video compositing order is bottom-up in display terms: V1 under V2.

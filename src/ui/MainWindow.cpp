@@ -25,6 +25,7 @@
 #include "ui/panels/MediaPanel.h"
 #include "ui/panels/ProjectInfoPanel.h"
 #include "ui/panels/TitlesBrowserPanel.h"
+#include "ui/panels/TransitionsBrowserPanel.h"
 #include "ui/playback/PlaybackController.h"
 #include "ui/preview/PreviewPanel.h"
 #include "ui/preview/PreviewWidget.h"
@@ -214,7 +215,7 @@ void MainWindow::buildMenus() {
     auto* clip = menuBar()->addMenu(tr("&Clip"));
     add(clip, {ActionId::EditCut, ActionId::ClipSplit, ActionId::ClipTrimStartToPlayhead, ActionId::ClipTrimEndToPlayhead, ActionId::ClipRippleDelete});
     clip->addSeparator();
-    add(clip, {ActionId::ClipSpeed, ActionId::ClipProperties, ActionId::ClipRevealInMedia});
+    add(clip, {ActionId::ClipSpeed, ActionId::ClipAddTransition, ActionId::ClipProperties, ActionId::ClipRevealInMedia});
     clip->addSeparator();
     auto* nudge = clip->addMenu(tr("&Nudge"));
     add(nudge, {ActionId::ClipNudgeLeft, ActionId::ClipNudgeRight, ActionId::ClipNudgeLeftLarge, ActionId::ClipNudgeRightLarge});
@@ -387,10 +388,12 @@ void MainWindow::buildPanels() {
     m_projectInfo = new ProjectInfoPanel(*m_document, *m_actions, this);
     m_effectsBrowser = new EffectsBrowserPanel(this);
     m_titlesBrowser = new TitlesBrowserPanel(this);
+    m_transitionsBrowser = new TransitionsBrowserPanel(this);
 
     m_browser = new BrowserPanel(this);
     m_browser->addPage(m_mediaPanel, tr("Media"), QStringLiteral("media"), tr("Imported media and bins"));
     m_browser->addPage(m_effectsBrowser, tr("Effects"), QStringLiteral("effects"), tr("Clip effects: drag onto a clip or apply to the selection"));
+    m_browser->addPage(m_transitionsBrowser, tr("Transitions"), QStringLiteral("transitions"), tr("Transitions: drag onto a clip edge or add to the selection"));
     m_browser->addPage(m_titlesBrowser, tr("Titles"), QStringLiteral("titles"), tr("Title presets: drag onto the timeline or add at the playhead"));
     m_browser->addPage(m_projectInfo, tr("Project"), QStringLiteral("project"), tr("Project information and data locations"));
 
@@ -517,12 +520,21 @@ void MainWindow::connectActions() {
         }
         m_inspectorPanel->revealSection(QStringLiteral("effects"));
     });
+    connect(m_transitionsBrowser, &TransitionsBrowserPanel::applyRequested, this, [this](project::TransitionType type, Duration d) {
+        if (m_timelinePanel->view()->addTransition(type, d) == 0) {
+            m_toasts->show(tr("Select a video, image or title clip on an unlocked track first."), ToastHost::Kind::Warning);
+            return;
+        }
+        m_inspectorPanel->showTab(InspectorTab::Transition);
+    });
+    connect(tl, &TimelineView::transitionClicked, this, [this](project::ClipId) { m_inspectorPanel->showTab(InspectorTab::Transition); });
     connect(m_titlesBrowser, &TitlesBrowserPanel::addRequested, this, [this](int preset) {
         m_timelinePanel->view()->addTextClip(preset);
         m_timelinePanel->view()->setFocus(Qt::OtherFocusReason);
     });
     connect(tl, &TimelineView::selectionChanged, this, [this] {
         m_effectsBrowser->setCanApply(m_timelinePanel->view()->selectionHasVisual());
+        m_transitionsBrowser->setCanApply(m_timelinePanel->view()->selectionHasVisual());
         m_inspectorPanel->setSelection(m_timelinePanel->view()->selection());
         if (m_playback->mode() == PlaybackController::Mode::Source && m_timelinePanel->view()->hasSelection()) showSequenceInPreview(m_timelinePanel->view()->playhead());
     });
