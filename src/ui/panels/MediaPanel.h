@@ -21,6 +21,7 @@ class EmptyState;
 class ImportController;
 class MediaFilterProxy;
 class MediaModel;
+class ProxyController;
 class PanelHeader;
 class ThumbnailService;
 
@@ -43,6 +44,7 @@ public:
     void clearBinFilter();
     // Removes every item not used by the timeline (one undo step); returns how many.
     int removeUnused();
+    void setProxyController(ProxyController* proxies);
 
 signals:
     void thumbnailsChanged();
@@ -79,6 +81,7 @@ private:
     MediaModel* m_model;
     MediaFilterProxy* m_proxy;
     ThumbnailService* m_thumbnails;
+    ProxyController* m_proxies = nullptr;
 
     PanelHeader* m_header;
     QWidget* m_toolRow;

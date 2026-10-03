@@ -157,6 +157,7 @@ const ActionDef kActions[] = {
     {ActionId::SubtitlesImport, "subtitlesImport", "&Import Subtitles…", nullptr, C::Text, {}, {}, "Read an .srt or .vtt file onto the subtitle track"},
     {ActionId::SubtitlesExport, "subtitlesExport", "E&xport Subtitles…", nullptr, C::Text, {}, {}, "Write the subtitle track as .srt or .vtt", false, false},
     {ActionId::ClipFrameHold, "clipFrameHold", "Add Frame &Hold", nullptr, C::Clip, Shortcut{SHIFT | Qt::Key_H}, {}, "Freeze the frame at the playhead for 2 s; later clips move right", false, false},
+    {ActionId::PlaybackUseProxies, "playbackUseProxies", "Use &Proxies for Preview", nullptr, C::Playback, Shortcut{CTRL | Qt::ALT | Qt::Key_P}, {}, "Preview from 540p proxies where they exist (exports always use the originals)", true},
     {ActionId::TimelineAddText, "timelineAddText", "Add &Text",            "text",        C::Text, Shortcut{CTRL | Qt::Key_T}, {}, "Add a text clip at the playhead on the top video track"},
 
     // ---- Viewer

@@ -15,6 +15,8 @@
 #include "ui/inspector/KeyframeControls.h"
 #include "ui/widgets/ParamSlider.h"
 #include "ui/panels/MediaPanel.h"
+#include "ui/media/ProxyController.h"
+#include "lumaforge/media/MediaProbe.h"
 #include "ui/panels/ScopesPanel.h"
 #include "ui/timeline/TimelineView.h"
 
@@ -26,6 +28,7 @@
 #include <QPushButton>
 #include <QTreeWidget>
 #include <QApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFileInfo>
@@ -596,6 +599,42 @@ TEST_CASE("scopes: waveform, parade and vectorscope place known colours where th
     const QImage parade = scopes::render(scopes::Mode::Parade, solid(0, 0, 255), 300, 101);
     CHECK(qBlue(parade.pixel(250, 0)) > 100 && qRed(parade.pixel(50, 0)) < 40);
     CHECK(!scopes::render(scopes::Mode::Histogram, solid(10, 200, 30), 256, 100).isNull());
+}
+
+TEST_CASE("proxies: the controller makes a real proxy; the preview program uses it only when proxies are on") {
+    newProject();
+    auto& doc = g_window->document();
+    project::MediaItem m;
+    m.id = doc.allocateMediaId();
+    m.path = std::string(LF_TEST_MEDIA_DIR_UI) + "/countdown_720p30.mp4";
+    m.displayName = "countdown";
+    auto info = media::MediaProbe::probe(m.path);
+    CHECK(static_cast<bool>(info));
+    if (!info) return;
+    m.info = *info;
+    m.fingerprintSize = 12345;   // a fresh cache key for this test run
+    m.fingerprintMtime = QDateTime::currentSecsSinceEpoch();
+    const auto id = m.id;
+    doc.push(std::make_unique<project::ImportMediaCommand>(doc, std::vector<project::MediaItem>{m}));
+    auto* proxies = g_window->findChild<ProxyController*>();
+    CHECK(proxies != nullptr);
+    if (!proxies) return;
+    proxies->setUseProxies(false);
+    CHECK(proxies->state(id) == ProxyController::State::None);
+    proxies->create({id});
+    CHECK(proxies->state(id) == ProxyController::State::Making);
+    QElapsedTimer timer;
+    timer.start();
+    while (proxies->state(id) != ProxyController::State::Ready && proxies->state(id) != ProxyController::State::Failed && timer.elapsed() < 60000)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    CHECK(proxies->state(id) == ProxyController::State::Ready);
+    CHECK(proxies->overrides().empty());                  // off: originals
+    proxies->setUseProxies(true);
+    const auto o = proxies->overrides();
+    CHECK(o.size() == 1 && o.count(id) == 1);
+    proxies->remove({id});
+    CHECK(proxies->state(id) == ProxyController::State::None && proxies->overrides().empty());
+    proxies->setUseProxies(false);
 }
 
 int main(int argc, char** argv) {

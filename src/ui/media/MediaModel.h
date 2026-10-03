@@ -6,6 +6,8 @@
 #include <QHash>
 #include <QImage>
 
+#include <functional>
+
 namespace lf::ui {
 
 // Table model over Document::project().media. Column 0 doubles as the
@@ -27,6 +29,8 @@ public:
         SortKeyRole,            // per-column sortable value
         BinRole,                // QString, empty = unsorted
         UseCountRole,           // int: clips in the sequence that use the item
+        ProxyStateRole,         // int: ProxyController::State
+        ProxyProgressRole,      // double 0..1 while a proxy is being made
     };
     static constexpr const char* kMimeType = "application/x-lumaforge-media-ids";
 
@@ -46,6 +50,9 @@ public:
     [[nodiscard]] QModelIndex indexOf(project::MediaId id) const;
     [[nodiscard]] const project::MediaItem* item(project::MediaId id) const;
     [[nodiscard]] int useCount(project::MediaId id) const { return m_useCount.value(id, 0); }
+    // Proxy status source (state as int, progress); refreshProxy() repaints one item.
+    void setProxyInfo(std::function<std::pair<int, double>(project::MediaId)> info) { m_proxyInfo = std::move(info); }
+    void refreshProxy(project::MediaId id);
 
     static QList<project::MediaId> decodeMime(const QMimeData* data);
 
@@ -65,6 +72,7 @@ private:
     QHash<project::MediaId, QImage> m_thumbnails;
     QHash<project::MediaId, bool> m_thumbnailRequested;
     QHash<project::MediaId, int> m_useCount;
+    std::function<std::pair<int, double>(project::MediaId)> m_proxyInfo;
 };
 
 }  // namespace lf::ui

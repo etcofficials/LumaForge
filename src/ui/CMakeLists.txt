@@ -54,6 +54,7 @@ qt_add_library(lf_ui STATIC
     media/ThumbnailService.h media/ThumbnailService.cpp
     media/ImportController.h media/ImportController.cpp
     media/WaveformService.h media/WaveformService.cpp
+    media/ProxyController.h media/ProxyController.cpp
     playback/PlaybackController.h playback/PlaybackController.cpp
 )
 add_library(lumaforge::ui ALIAS lf_ui)

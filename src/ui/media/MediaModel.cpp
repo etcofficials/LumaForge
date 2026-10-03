@@ -55,6 +55,8 @@ QVariant MediaModel::data(const QModelIndex& index, int role) const {
         case HasVideoRole: return m.info.hasVideo();
         case BinRole: return qs(m.bin);
         case UseCountRole: return m_useCount.value(m.id, 0);
+        case ProxyStateRole: return m_proxyInfo ? m_proxyInfo(m.id).first : 0;
+        case ProxyProgressRole: return m_proxyInfo ? m_proxyInfo(m.id).second : 0.0;
         case ThumbnailRole: {
             auto it = m_thumbnails.find(m.id);
             if (it != m_thumbnails.end()) return *it;
@@ -77,6 +79,16 @@ QVariant MediaModel::data(const QModelIndex& index, int role) const {
             if (!m.bin.empty()) lines << tr("Bin: %1").arg(qs(m.bin).toHtmlEscaped());
             const int uses = m_useCount.value(m.id, 0);
             lines << (uses ? tr("Used by %n clip(s) in the timeline", nullptr, uses) : tr("Not used in the timeline"));
+            if (m_proxyInfo) {
+                const auto [state, progress] = m_proxyInfo(m.id);
+                switch (state) {
+                    case 1: lines << tr("Proxy: queued"); break;
+                    case 2: lines << tr("Proxy: being made (%1%)").arg(static_cast<int>(progress * 100)); break;
+                    case 3: lines << tr("Proxy: ready (540p, used for preview when proxies are on)"); break;
+                    case 4: lines << tr("Proxy: failed"); break;
+                    default: break;
+                }
+            }
             if (m.offline) lines << QStringLiteral("<span style='color:#E5533D'>File is missing</span>");
             return lines.join(QStringLiteral("<br>"));
         }
@@ -182,6 +194,11 @@ void MediaModel::setThumbnail(project::MediaId id, const QImage& image) {
     m_thumbnails.insert(id, image);
     const QModelIndex idx = indexOf(id);
     if (idx.isValid()) emit dataChanged(idx, idx, {ThumbnailRole, Qt::DecorationRole});
+}
+
+void MediaModel::refreshProxy(project::MediaId id) {
+    const QModelIndex idx = indexOf(id);
+    if (idx.isValid()) emit dataChanged(idx, index(idx.row(), ColumnCount - 1), {ProxyStateRole, ProxyProgressRole, Qt::ToolTipRole});
 }
 
 void MediaModel::recountUses() {

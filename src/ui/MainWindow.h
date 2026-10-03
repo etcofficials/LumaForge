@@ -43,6 +43,7 @@ class TitlesBrowserPanel;
 class TransitionsBrowserPanel;
 class MarkersPanel;
 class MixerPanel;
+class ProxyController;
 class ScopesPanel;
 class ExportController;
 class ExportSettingsPanel;
@@ -152,6 +153,7 @@ private:
     TransitionsBrowserPanel* m_transitionsBrowser = nullptr;
     MarkersPanel* m_markersPanel = nullptr;
     MixerPanel* m_mixerPanel = nullptr;
+    ProxyController* m_proxies = nullptr;
     ScopesPanel* m_scopesPanel = nullptr;
     ExportController* m_exportController = nullptr;
     ExportSettingsPanel* m_exportSettings = nullptr;

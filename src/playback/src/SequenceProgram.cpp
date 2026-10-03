@@ -6,7 +6,9 @@ namespace lf::playback {
 
 using namespace project;
 
-SequenceProgram::SequenceProgram(const Project& project)
+SequenceProgram::SequenceProgram(const Project& project) : SequenceProgram(project, {}) {}
+
+SequenceProgram::SequenceProgram(const Project& project, const std::map<MediaId, std::string>& overrides)
     : m_frameRate(project.settings.frameRate), m_width(project.settings.width), m_height(project.settings.height) {
     const auto& seq = project.sequence;
     m_duration = seq.duration();
@@ -24,6 +26,7 @@ SequenceProgram::SequenceProgram(const Project& project)
                     const MediaItem* item = project.findMedia(c.media);
                     if (!item || item->offline) continue;
                     e.path = item->path;
+                    if (auto o = overrides.find(item->id); o != overrides.end() && c.kind == ClipKind::Video) e.path = o->second;
                     e.isImage = c.kind == ClipKind::Image;
                     e.mediaDuration = item->info.duration;
                 }

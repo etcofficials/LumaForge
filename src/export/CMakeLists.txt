@@ -1,10 +1,12 @@
 add_library(lf_export STATIC
     include/lumaforge/export/ExportSettings.h
     include/lumaforge/export/Exporter.h
+    include/lumaforge/export/Proxy.h
     src/ExportSettings.cpp
     src/Exporter.cpp
     src/Muxer.h
     src/Muxer.cpp
+    src/Proxy.cpp
 )
 add_library(lumaforge::export ALIAS lf_export)
 target_include_directories(lf_export PUBLIC include)

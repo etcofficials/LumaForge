@@ -208,3 +208,49 @@ TEST_CASE("export: an encoder that cannot start falls back to x264 and says so")
     CHECK(static_cast<bool>(r));
     if (r) CHECK(r->videoEncoder == "libx264" && !r->note.empty());
 }
+
+#include "lumaforge/export/Proxy.h"
+#include "lumaforge/playback/SequenceProgram.h"
+
+TEST_CASE("proxies: deterministic names, a real 540p transcode with the same timing, used only when asked") {
+    Project p = countdownProject();
+    const MediaItem& item = p.media[0];
+    CHECK(proxyApplies(item));
+    CHECK(proxyFileName(item) == proxyFileName(item));
+    MediaItem moved = item;
+    moved.fingerprintMtime += 1;   // the source changed: a different proxy
+    CHECK(proxyFileName(moved) != proxyFileName(item));
+    CHECK(proxyFileName(item).ends_with("_540p.mp4"));
+
+    const std::string out = kOutDir + "/proxy_" + proxyFileName(item, 360);
+    std::filesystem::remove(out);
+    std::atomic<bool> cancel{false};
+    double last = 0;
+    auto made = makeProxy(item.path, out, 360, [&](double f) { last = f; }, cancel);
+    CHECK(static_cast<bool>(made));
+    if (!made) { std::printf("    proxy error: %s\n", made.error().fullText().c_str()); return; }
+    CHECK(last == 1.0);
+    auto src = media::MediaProbe::probe(item.path);
+    auto proxy = media::MediaProbe::probe(out);
+    CHECK(src && proxy && proxy->video && !proxy->audio);
+    if (!src || !proxy || !proxy->video) return;
+    CHECK(proxy->video->height == 360 && proxy->video->width == 640);
+    CHECK(std::abs(proxy->duration.toSeconds() - src->duration.toSeconds()) < 0.15);
+
+    // The program swaps the path only for overridden media.
+    playback::SequenceProgram plain(p);
+    playback::SequenceProgram withProxy(p, {{item.id, out}});
+    std::vector<playback::VideoLayerRequest> a, b;
+    plain.videoLayersAt(TimePoint::fromSeconds(1), a);
+    withProxy.videoLayersAt(TimePoint::fromSeconds(1), b);
+    CHECK(a.size() == 1 && b.size() == 1 && a[0].path == item.path && b[0].path == out && a[0].sourceTime == b[0].sourceTime);
+    std::vector<playback::AudioClipRequest> audio;
+    withProxy.audioClipsAt(TimePoint::fromSeconds(1), audio);
+    CHECK(audio.size() == 1 && audio[0].path == item.path);   // sound from the original
+
+    // Cancelling leaves nothing behind.
+    std::atomic<bool> stop{true};
+    const std::string cancelled = kOutDir + "/proxy_cancelled.mp4";
+    CHECK(!makeProxy(item.path, cancelled, 360, {}, stop));
+    CHECK(!std::filesystem::exists(cancelled) && !std::filesystem::exists(kOutDir + "/proxy_cancelled.partial.mp4"));
+}

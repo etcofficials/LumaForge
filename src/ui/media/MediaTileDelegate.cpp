@@ -83,6 +83,21 @@ void MediaTileDelegate::paint(QPainter* p, const QStyleOptionViewItem& opt, cons
         p->setBrush(pal.accent);
         p->drawRoundedRect(QRect(thumbRect.right() - 13, thumbRect.top() + 5, 8, 8), 2, 2);
     }
+    if (const int proxy = index.data(MediaModel::ProxyStateRole).toInt(); proxy == 2 || proxy == 3 || proxy == 1) {
+        // Proxy badge, bottom left: "P" when ready, progress while being made.
+        QFont f = opt.font;
+        f.setPointSizeF(f.pointSizeF() - 1);
+        f.setBold(true);
+        p->setFont(f);
+        const QString text = proxy == 3 ? QStringLiteral("P") : proxy == 2 ? QStringLiteral("P %1%").arg(static_cast<int>(index.data(MediaModel::ProxyProgressRole).toDouble() * 100)) : QStringLiteral("P …");
+        const QRect tr = p->fontMetrics().boundingRect(text).adjusted(-4, -1, 4, 1);
+        const QRect badge(thumbRect.left() + 4, thumbRect.bottom() - tr.height() - 4, tr.width(), tr.height());
+        p->setPen(Qt::NoPen);
+        p->setBrush(proxy == 3 ? pal.accent : QColor(0, 0, 0, 170));
+        p->drawRoundedRect(badge, 2, 2);
+        p->setPen(proxy == 3 ? pal.accentText : pal.textPrimary);
+        p->drawText(badge, Qt::AlignCenter, text);
+    }
     if (index.data(MediaModel::OfflineRole).toBool()) {
         p->setPen(Qt::NoPen);
         p->setBrush(pal.danger);

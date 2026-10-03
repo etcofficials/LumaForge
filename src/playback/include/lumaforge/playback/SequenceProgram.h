@@ -3,6 +3,7 @@
 #include "lumaforge/playback/Program.h"
 #include "lumaforge/project/Project.h"
 
+#include <map>
 #include <unordered_map>
 
 namespace lf::playback {
@@ -13,6 +14,9 @@ namespace lf::playback {
 class SequenceProgram final : public Program {
 public:
     explicit SequenceProgram(const project::Project& project);
+    // Preview with proxies: visual media listed here are read from the given
+    // file instead (same media time). Audio always comes from the original.
+    SequenceProgram(const project::Project& project, const std::map<project::MediaId, std::string>& videoPathOverrides);
 
     [[nodiscard]] Duration duration() const override { return m_duration; }
     [[nodiscard]] Rational frameRate() const override { return m_frameRate; }

@@ -31,6 +31,7 @@ add_test(NAME lf_tests COMMAND lf_tests)
 # through QWindowSystemInterface (Qt::GuiPrivate), on the offscreen platform.
 add_executable(lf_ui_tests TestMain.h ui/test_ui.cpp)
 target_link_libraries(lf_ui_tests PRIVATE lumaforge::ui Qt6::Widgets Qt6::GuiPrivate)
+target_compile_definitions(lf_ui_tests PRIVATE LF_TEST_MEDIA_DIR_UI="${CMAKE_CURRENT_SOURCE_DIR}/media")
 get_target_property(_lf_qmake Qt6::qmake IMPORTED_LOCATION)
 get_filename_component(_lf_qt_root "${_lf_qmake}/../.." ABSOLUTE)
 add_custom_command(TARGET lf_ui_tests POST_BUILD

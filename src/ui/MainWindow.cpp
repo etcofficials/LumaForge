@@ -21,6 +21,7 @@
 #include "ui/dialogs/ProjectSettingsDialog.h"
 #include "ui/home/HomeScreen.h"
 #include "ui/media/ImportController.h"
+#include "ui/media/ProxyController.h"
 #include "ui/panels/BrowserPanel.h"
 #include "ui/panels/EffectsBrowserPanel.h"
 #include "ui/panels/InspectorPanel.h"
@@ -223,6 +224,8 @@ void MainWindow::buildMenus() {
     add(playback, {ActionId::MarkIn, ActionId::MarkOut, ActionId::GoToIn, ActionId::GoToOut, ActionId::ClearInOut});
     playback->addSeparator();
     add(playback, {ActionId::MarkerNext, ActionId::MarkerPrevious});
+    playback->addSeparator();
+    add(playback, {ActionId::PlaybackUseProxies});
 
     auto* clip = menuBar()->addMenu(tr("&Clip"));
     add(clip, {ActionId::EditCut, ActionId::ClipSplit, ActionId::ClipTrimStartToPlayhead, ActionId::ClipTrimEndToPlayhead, ActionId::ClipRippleDelete});
@@ -402,6 +405,8 @@ QDockWidget* MainWindow::makeDock(const QString& title, const QString& objectNam
 
 void MainWindow::buildPanels() {
     m_mediaPanel = new MediaPanel(*m_document, *m_actions, *m_importer, this);
+    m_proxies = new ProxyController(*m_document, this);
+    m_mediaPanel->setProxyController(m_proxies);
     m_previewPanel = new PreviewPanel(*m_actions, *m_playback, this);
     m_inspectorPanel = new InspectorPanel(*m_document, this);
     m_timelinePanel = new TimelinePanel(*m_document, *m_actions, this);
@@ -625,6 +630,13 @@ void MainWindow::connectActions() {
     });
     m_actions->connect(ActionId::Export, this, [this] { m_workspaces->switchTo(Workspace::Export); });
     m_actions->connect(ActionId::AudioRecordVoiceOver, this, [this] { recordVoiceOver(); });
+    m_actions->action(ActionId::PlaybackUseProxies)->setChecked(m_proxies->useProxies());
+    connect(m_actions->action(ActionId::PlaybackUseProxies), &QAction::toggled, m_proxies, &ProxyController::setUseProxies);
+    connect(m_proxies, &ProxyController::useProxiesChanged, this, [this](bool on) {
+        m_actions->action(ActionId::PlaybackUseProxies)->setChecked(on);
+        m_toasts->show(on ? tr("Preview uses proxies where available") : tr("Preview uses the original media"), ToastHost::Kind::Info);
+    });
+    connect(m_proxies, &ProxyController::proxiesChanged, this, [this] { scheduleSequenceRefresh(); });
     m_actions->connect(ActionId::SubtitleAdd, this, [this] {
         project::SequenceEdit edit = project::addSubtitle(*m_document, m_timelinePanel->view()->playhead());
         if (edit.empty()) return;
@@ -914,7 +926,7 @@ void MainWindow::scheduleSequenceRefresh() {
 
 void MainWindow::refreshSequenceProgram() {
     const auto& project = m_document->project();
-    m_sequenceProgram = project.sequence.clips.empty() ? nullptr : std::make_shared<playback::SequenceProgram>(project);
+    m_sequenceProgram = project.sequence.clips.empty() ? nullptr : std::make_shared<playback::SequenceProgram>(project, m_proxies->overrides());
     // Only the timeline view of the preview follows edits; a source preview stays put.
     if (m_playback->mode() == PlaybackController::Mode::Source) return;
     const TimePoint keep = m_timelinePanel->view()->playhead();
@@ -924,7 +936,7 @@ void MainWindow::refreshSequenceProgram() {
 
 void MainWindow::showSequenceInPreview(TimePoint at) {
     if (m_playback->mode() == PlaybackController::Mode::Sequence) return;
-    if (!m_sequenceProgram && !m_document->project().sequence.clips.empty()) m_sequenceProgram = std::make_shared<playback::SequenceProgram>(m_document->project());
+    if (!m_sequenceProgram && !m_document->project().sequence.clips.empty()) m_sequenceProgram = std::make_shared<playback::SequenceProgram>(m_document->project(), m_proxies->overrides());
     if (!m_sequenceProgram) { m_playback->clearProgram(); return; }
     m_playback->setProgram(m_sequenceProgram, PlaybackController::Mode::Sequence, tr("Timeline"), at);
 }

@@ -9,6 +9,7 @@
 #include "ui/media/ImportController.h"
 #include "ui/media/MediaModel.h"
 #include "ui/media/MediaTileDelegate.h"
+#include "ui/media/ProxyController.h"
 #include "ui/media/ThumbnailService.h"
 #include "ui/widgets/EmptyState.h"
 #include "ui/widgets/PanelHeader.h"
@@ -415,6 +416,12 @@ int MediaPanel::removeUnused() {
     return n;
 }
 
+void MediaPanel::setProxyController(ProxyController* proxies) {
+    m_proxies = proxies;
+    m_model->setProxyInfo([proxies](project::MediaId id) { return std::pair<int, double>{static_cast<int>(proxies->state(id)), proxies->progress(id)}; });
+    connect(proxies, &ProxyController::stateChanged, m_model, &MediaModel::refreshProxy);
+}
+
 void MediaPanel::renameMedia(project::MediaId id) {
     const auto* item = m_model->item(id);
     if (!item) return;
@@ -459,6 +466,26 @@ void MediaPanel::showContextMenu(const QPoint& globalPos) {
             auto* props = menu.addAction(tr("Properties…"));
             connect(props, &QAction::triggered, this, [this, id = ids.first()] { showProperties(id); });
             menu.addSeparator();
+        }
+        if (m_proxies) {
+            QList<project::MediaId> can, has, busy;
+            for (auto id : ids) {
+                const auto s = m_proxies->state(id);
+                const auto* item = m_model->item(id);
+                if (!item || item->type() != media::MediaType::Video) continue;
+                if (s == ProxyController::State::Ready) has << id;
+                else if (s == ProxyController::State::Queued || s == ProxyController::State::Making) busy << id;
+                else can << id;
+            }
+            if (!can.isEmpty() || !has.isEmpty() || !busy.isEmpty()) {
+                auto* create = menu.addAction(can.size() > 1 ? tr("Create %1 Proxies (540p)").arg(can.size()) : tr("Create Proxy (540p)"));
+                create->setEnabled(!can.isEmpty());
+                create->setToolTip(tr("A small H.264 copy for smooth preview; exports always use the original"));
+                connect(create, &QAction::triggered, this, [this, can] { m_proxies->create(can); });
+                if (!busy.isEmpty()) connect(menu.addAction(tr("Cancel Proxy")), &QAction::triggered, this, [this, busy] { for (auto id : busy) m_proxies->cancel(id); });
+                if (!has.isEmpty()) connect(menu.addAction(tr("Delete Proxy")), &QAction::triggered, this, [this, has] { m_proxies->remove(has); });
+                menu.addSeparator();
+            }
         }
         // Move to bin
         auto* binMenu = menu.addMenu(Icons::icon(QStringLiteral("folder")), tr("Move to Bin"));
