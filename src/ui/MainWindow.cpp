@@ -17,6 +17,7 @@
 #include "ui/dialogs/CommandPalette.h"
 #include "ui/dialogs/DiagnosticsDialog.h"
 #include "ui/dialogs/ShortcutEditor.h"
+#include "ui/dialogs/VoiceOverDialog.h"
 #include "ui/dialogs/ProjectSettingsDialog.h"
 #include "ui/home/HomeScreen.h"
 #include "ui/media/ImportController.h"
@@ -44,6 +45,7 @@
 
 #include <QApplication>
 #include <QCloseEvent>
+#include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
 #include <QDockWidget>
@@ -255,6 +257,8 @@ void MainWindow::buildMenus() {
     add(timeline, {ActionId::MarkerAdd});
 
     auto* audio = menuBar()->addMenu(tr("&Audio"));
+    add(audio, {ActionId::AudioRecordVoiceOver});
+    audio->addSeparator();
     add(audio, {ActionId::AudioMuteClip});
 
     auto* video = menuBar()->addMenu(tr("&Video"));
@@ -616,6 +620,7 @@ void MainWindow::connectActions() {
         else seekTimeline(TimePoint{m_document->project().sequence.duration().ticks});
     });
     m_actions->connect(ActionId::Export, this, [this] { m_workspaces->switchTo(Workspace::Export); });
+    m_actions->connect(ActionId::AudioRecordVoiceOver, this, [this] { recordVoiceOver(); });
     m_actions->connect(ActionId::SubtitleAdd, this, [this] {
         project::SequenceEdit edit = project::addSubtitle(*m_document, m_timelinePanel->view()->playhead());
         if (edit.empty()) return;
@@ -1065,6 +1070,62 @@ void MainWindow::showDiagnostics(const QString& tab) {
 void MainWindow::ensurePreviewProgram() {
     // Transport keys act on the timeline unless the source monitor is showing media.
     if (m_playback->mode() == PlaybackController::Mode::None) showSequenceInPreview(m_timelinePanel->view()->playhead());
+}
+
+void MainWindow::recordVoiceOver() {
+    showEditor();
+    m_playback->pause();
+    const TimePoint at = m_timelinePanel->view()->playhead();
+    const QDir dir(AppPaths::path(AppPaths::Kind::Recordings));
+    QDir().mkpath(dir.absolutePath());
+    QString base = QString::fromStdString(m_document->project().settings.name);
+    if (base.isEmpty()) base = tr("Voice-over");
+    for (QChar ch : QStringLiteral("\\/:*?\"<>|")) base.replace(ch, QLatin1Char('_'));
+    const QString path = dir.filePath(QStringLiteral("%1 voice %2.wav").arg(base, QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"))));
+    VoiceOverDialog dlg(path, this);
+    connect(&dlg, &VoiceOverDialog::recordingStarted, this, [this, &dlg, at] {
+        if (!dlg.playTimeline() || m_document->project().sequence.clips.empty()) return;
+        seekTimeline(at);
+        m_playback->play();
+    });
+    connect(&dlg, &VoiceOverDialog::recordingStopped, this, [this] { m_playback->pause(); });
+    if (dlg.exec() != QDialog::Accepted || dlg.recordedFile().isEmpty()) return;
+    auto conn = std::make_shared<QMetaObject::Connection>();
+    *conn = connect(m_importer, &ImportController::mediaImported, this, [this, at, conn](const QList<project::MediaId>& ids) {
+        QObject::disconnect(*conn);
+        if (!ids.isEmpty()) placeAudioOnFreeTrack(ids.front(), at);
+    });
+    m_importer->importFiles({dlg.recordedFile()}, this);
+}
+
+void MainWindow::placeAudioOnFreeTrack(project::MediaId media, TimePoint at) {
+    const project::MediaItem* item = m_document->project().findMedia(media);
+    if (!item) return;
+    const auto& seq = m_document->project().sequence;
+    const TimeRange range{at, item->info.duration};
+    project::SequenceEdit edit;
+    project::TrackId target = project::TrackId::Invalid;
+    for (const auto* t : seq.audioTracks()) {
+        if (t->locked) continue;
+        bool free = true;
+        for (const auto* c : seq.clipsOnTrack(t->id)) free &= !(c->start < range.end() && range.start < c->end());
+        if (free) { target = t->id; break; }
+    }
+    if (!project::isValid(target)) {
+        edit = project::ops::addTrack(*m_document, project::TrackKind::Audio, -1);
+        if (edit.tracksAdded.empty()) return;
+        target = edit.tracksAdded.front().second.id;
+    }
+    project::ops::Placement placement;
+    placement.audioTrack = target;
+    placement.start = at;
+    auto clips = project::ops::clipsForMedia(*m_document, *item, placement);
+    std::vector<project::ClipId> ids;
+    for (auto& c : clips) { ids.push_back(c.id); edit.add(std::move(c)); }
+    if (ids.empty()) return;
+    m_document->push(std::make_unique<project::SequenceEditCommand>(*m_document, tr("Add Voice-over").toStdString(), std::move(edit)));
+    m_timelinePanel->view()->setSelection(ids);
+    m_toasts->show(tr("Voice-over added (%1)").arg(formatClock(item->info.duration)), ToastHost::Kind::Success);
 }
 
 void MainWindow::stepFrames(int frames) {

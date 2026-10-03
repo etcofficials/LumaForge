@@ -106,6 +106,9 @@ private:
     void ensurePreviewProgram();
     void seekTimeline(TimePoint t);
     void stepFrames(int frames);
+    void recordVoiceOver();
+    // Puts an audio media item at `at` on the first audio track that is free there (adds one if needed).
+    void placeAudioOnFreeTrack(project::MediaId media, TimePoint at);
     void applyLoop();
     void importFolderWithDialog();
     void setViewerFullscreen(bool on);

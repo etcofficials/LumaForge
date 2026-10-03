@@ -13,6 +13,7 @@
 #include "lumaforge/project/TimelineOps.h"
 
 #include <cmath>
+#include <filesystem>
 #include <vector>
 
 using namespace lf;
@@ -208,4 +209,24 @@ TEST_CASE("serializer v8: pan, audio fx, track volume/pan, master, reverse/freez
     CHECK(loaded->project.sequence.clips == p.sequence.clips);
     CHECK(loaded->project.sequence.tracks == p.sequence.tracks);
     CHECK(loaded->project.sequence.masterVolume == 0.9f && !loaded->project.sequence.masterLimiter);
+}
+
+#include "lumaforge/audio/AudioRecorder.h"
+#include <chrono>
+#include <thread>
+
+TEST_CASE("voice-over recorder: records a valid WAV when a microphone exists") {
+    auto rec = audio::AudioRecorder::create();
+    if (!rec) { std::printf("    (no microphone: %s)\n", rec.error().fullText().c_str()); return; }
+    const std::string path = "G:/Caches/tmp/lf_export_tests/recording.wav";
+    std::filesystem::create_directories("G:/Caches/tmp/lf_export_tests");
+    auto started = (*rec)->start(path);
+    if (!started) { std::printf("    (microphone not usable: %s)\n", started.error().fullText().c_str()); return; }
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    auto length = (*rec)->stop();
+    CHECK(static_cast<bool>(length));
+    if (!length) return;
+    auto info = media::MediaProbe::probe(path);
+    CHECK(info && info->hasAudio() && info->audio->sampleRate == 48000 && info->audio->channels == 2);
+    if (info) CHECK(std::abs(info->duration.toSeconds() - length->toSeconds()) < 0.05 && length->toSeconds() > 0.3);
 }

@@ -44,6 +44,7 @@ qt_add_library(lf_ui STATIC
     dialogs/DiagnosticsDialog.h dialogs/DiagnosticsDialog.cpp
     dialogs/CommandPalette.h dialogs/CommandPalette.cpp
     dialogs/ShortcutEditor.h dialogs/ShortcutEditor.cpp
+    dialogs/VoiceOverDialog.h dialogs/VoiceOverDialog.cpp
     dialogs/MediaPropertiesDialog.h dialogs/MediaPropertiesDialog.cpp
     dialogs/ProjectSettingsDialog.h dialogs/ProjectSettingsDialog.cpp
     project/ProjectController.h project/ProjectController.cpp

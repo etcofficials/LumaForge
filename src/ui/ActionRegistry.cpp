@@ -177,6 +177,7 @@ const ActionDef kActions[] = {
     {ActionId::VideoCrop,       "videoCrop",       "&Crop",                nullptr,       C::Video, {}, {}, "Show the crop controls of the selected clip", false, false},
     {ActionId::VideoColor,      "videoColor",      "C&olor",               nullptr,       C::Video, {}, {}, "Show the colour controls of the selected clip", false, false},
     {ActionId::VideoEffects,    "videoEffects",    "&Effects",             nullptr,       C::Video, {}, {}, "Show the effect stack of the selected clip", false, false},
+    {ActionId::AudioRecordVoiceOver, "audioRecordVoiceOver", "&Record Voice-over…", nullptr, C::Audio, Shortcut{CTRL | SHIFT | Qt::Key_R}, {}, "Record from the microphone at the playhead onto a free audio track"},
     {ActionId::AudioMuteClip,   "audioMuteClip",   "&Mute Clip",           "audio-muted", C::Audio, {}, {}, "Mute or unmute the selected audio clips", true, false},
 
     // ---- View / Help
