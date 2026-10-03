@@ -7,6 +7,7 @@ class QToolButton;
 
 namespace lf::ui {
 
+class AnimatedParam;
 class ParamSlider;
 
 // Volume (dB), mute and fades of the audio clip (or the linked audio of a
@@ -22,6 +23,7 @@ public:
 
 private:
     ParamSlider* m_volume;
+    AnimatedParam* m_volumeParam = nullptr;
     QCheckBox* m_mute;
     ParamSlider* m_fadeIn;
     ParamSlider* m_fadeOut;

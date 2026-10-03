@@ -145,7 +145,21 @@ void InspectorPanel::setSelection(const std::vector<ClipId>& ids) {
 void InspectorPanel::setPlayhead(TimePoint t) {
     if (t == m_playhead) return;
     m_playhead = t;
-    emit playheadDependentChanged();
+    // Values shown follow the playhead only for animated clips; keyframe
+    // diamonds also change when the playhead enters or leaves a clip.
+    const auto& seq = m_doc.project().sequence;
+    bool animated = false;
+    std::vector<bool> inside;
+    for (auto id : m_selection) {
+        if (const Clip* c = seq.findClip(id)) {
+            animated |= !c->animation.empty();
+            inside.push_back(c->contains(t));
+        }
+    }
+    if (animated || inside != m_insideState) {
+        m_insideState = std::move(inside);
+        reload();
+    }
 }
 
 std::vector<std::vector<const Clip*>> InspectorPanel::items() const {

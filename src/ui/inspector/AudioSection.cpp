@@ -1,6 +1,7 @@
 #include "ui/inspector/AudioSection.h"
 
 #include "lumaforge/project/TimelineOps.h"
+#include "ui/inspector/KeyframeControls.h"
 #include "ui/widgets/ParamSlider.h"
 
 #include <QCheckBox>
@@ -38,13 +39,9 @@ AudioSection::AudioSection(InspectorContext& ctx, QWidget* parent) : InspectorSe
     m_fadeOut->setSuffix(QStringLiteral(" s"));
     f->addRow(tr("Fade out"), m_fadeOut);
 
-    // Edits touch audio clips only, even when the linked video clip is selected too.
-    connect(m_volume, &ParamSlider::valueEdited, this, [this](double db) {
-        if (m_loading) return;
-        const float lin = dbToLinear(db);
-        m_ctx.editSelection(tr("Volume"), prop::Volume, [lin](Clip& c) { if (c.kind == ClipKind::Audio) c.audio.volume = lin; });
-    });
-    connect(m_volume, &ParamSlider::gestureFinished, this, [this] { m_ctx.endGesture(); });
+    // Edits touch audio clips only (the section context filters), even when the linked video clip is selected too.
+    m_volumeParam = new AnimatedParam(m_volume, m_ctx, m_loading, {AnimProp::Volume}, tr("Volume"), prop::Volume,
+                                      [](float lin) { return std::round(linearToDb(lin) * 10.0) / 10.0; }, [](double db) { return dbToLinear(db); });
     connect(m_mute, &QCheckBox::toggled, this, [this](bool on) {
         if (m_loading) return;
         m_ctx.editSelection(on ? tr("Mute Clip") : tr("Unmute Clip"), prop::Mute, [on](Clip& c) { if (c.kind == ClipKind::Audio) c.audio.muted = on; });
@@ -72,7 +69,7 @@ AudioSection::AudioSection(InspectorContext& ctx, QWidget* parent) : InspectorSe
 
 void AudioSection::load(const Clip& c, int) {
     LoadGuard guard(m_loading);
-    m_volume->setValue(std::round(linearToDb(c.audio.volume) * 10.0) / 10.0);
+    m_volumeParam->load(c);
     m_mute->setChecked(c.audio.muted);
     m_fadeIn->setValue(c.audio.fadeIn.toSeconds());
     m_fadeOut->setValue(c.audio.fadeOut.toSeconds());

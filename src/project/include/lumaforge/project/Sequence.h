@@ -3,8 +3,10 @@
 #include "lumaforge/core/Rational.h"
 #include "lumaforge/core/Time.h"
 #include "lumaforge/core/VisualParams.h"
+#include "lumaforge/project/Animation.h"
 #include "lumaforge/project/Ids.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -56,6 +58,7 @@ struct Clip {
     std::vector<Effect> effects;   // ordered; see applyEffects()
     AudioParams audio;
     TextParams text;
+    std::vector<KeyTrack> animation;   // keyframed properties (see Animation.h); empty = static
 
     [[nodiscard]] constexpr TimePoint end() const noexcept { return start + duration; }
     [[nodiscard]] constexpr TimeRange range() const noexcept { return {start, duration}; }
@@ -66,6 +69,10 @@ struct Clip {
         const Ticks offset = t.ticks - start.ticks;
         return TimePoint{sourceIn.ticks + offset * speed.num / speed.den};
     }
+    // Media time -> sequence time (inverse of sourceTimeAt).
+    [[nodiscard]] constexpr TimePoint sequenceTimeAt(TimePoint source) const noexcept {
+        return TimePoint{start.ticks + (source.ticks - sourceIn.ticks) * speed.den / speed.num};
+    }
     [[nodiscard]] constexpr Duration sourceDuration() const noexcept { return Duration{duration.ticks * speed.num / speed.den}; }
     [[nodiscard]] constexpr TimePoint sourceOut() const noexcept { return sourceIn + sourceDuration(); }
     // Media duration -> sequence duration at this clip's speed.
@@ -73,6 +80,30 @@ struct Clip {
 
     friend bool operator==(const Clip&, const Clip&) = default;
 };
+
+// ---- keyframe helpers (Animation.cpp). `source` is media time; values are in
+// model units (fractions for crop/opacity, 1 = 100% for scale, linear volume).
+[[nodiscard]] const KeyTrack* findKeyTrack(const Clip& c, AnimProp prop) noexcept;
+[[nodiscard]] inline bool isAnimated(const Clip& c, AnimProp prop) noexcept { return findKeyTrack(c, prop) != nullptr; }
+[[nodiscard]] float baseValue(const Clip& c, AnimProp prop) noexcept;
+void setBaseValue(Clip& c, AnimProp prop, float value) noexcept;
+// The value shown at `source`: the animation when keyed, else the static value.
+[[nodiscard]] float valueAt(const Clip& c, AnimProp prop, TimePoint source) noexcept;
+[[nodiscard]] const Keyframe* keyAt(const Clip& c, AnimProp prop, TimePoint source) noexcept;
+// Adds or replaces the key at `source` (interp defaults to that of the key before it).
+void setKey(Clip& c, AnimProp prop, TimePoint source, float value, std::optional<Interp> interp = std::nullopt);
+// Removes the key at `source`; removing the last key leaves the property static at its value.
+bool removeKey(Clip& c, AnimProp prop, TimePoint source);
+// Drops every key of the property, keeping the value it has at `source`.
+void clearAnimation(Clip& c, AnimProp prop, TimePoint source);
+// An edit from the UI: sets a key at `source` when the property is animated, else the static value.
+void setValueAt(Clip& c, AnimProp prop, TimePoint source, float value);
+// Applies animated transform / crop properties at `source` on top of the static values.
+void animatedTransform(const Clip& c, TimePoint source, Transform2D& transform, Crop& crop) noexcept;
+// Media time for keyframing at a sequence time, clamped into the clip.
+[[nodiscard]] TimePoint animationTime(const Clip& c, TimePoint sequenceTime) noexcept;
+// Every key time of every property, sorted, unique (media time).
+[[nodiscard]] std::vector<TimePoint> keyTimes(const Clip& c);
 
 // Tracks are stored in display order, top to bottom (V2, V1, A1, A2).
 // Video compositing order is bottom-up in display terms: V1 under V2.

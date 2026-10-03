@@ -96,7 +96,7 @@ TEST_CASE("rename media notifies MediaOrganized (no thumbnail invalidation) and 
     CHECK(doc.project().findMedia(a)->displayName == "a.mp4");
 }
 
-TEST_CASE("serializer v4: bins and bin assignments round-trip; older files load without them") {
+TEST_CASE("serializer v4+: bins and bin assignments round-trip; older files load without them") {
     Document doc;
     const MediaId a = addMedia(doc, "a.mp4");
     addMedia(doc, "b.mp4");
@@ -106,13 +106,14 @@ TEST_CASE("serializer v4: bins and bin assignments round-trip; older files load 
     auto loaded = serializer::fromJson(json, "");
     CHECK(static_cast<bool>(loaded));
     if (!loaded) return;
-    CHECK(loaded->fileVersion == 4);
+    CHECK(loaded->fileVersion == serializer::kFormatVersion);
     CHECK(loaded->project.bins == (std::vector<std::string>{"Selects", "Empty bin"}));
     CHECK(loaded->project.findMedia(a)->bin == "Selects");
     CHECK(loaded->project.media[1].bin.empty());
 
     std::string v3 = json;
-    v3.replace(v3.find("\"version\": 4"), 12, "\"version\": 3");
+    const std::string current = "\"version\": " + std::to_string(serializer::kFormatVersion);
+    v3.replace(v3.find(current), current.size(), "\"version\": 3");
     const auto binsKey = v3.find("\"bins\"");
     CHECK(binsKey != std::string::npos);
     auto old = serializer::fromJson(v3, "");

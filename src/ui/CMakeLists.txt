@@ -21,6 +21,7 @@ qt_add_library(lf_ui STATIC
     inspector/EffectsSection.h inspector/EffectsSection.cpp
     inspector/TextSections.h inspector/TextSections.cpp
     inspector/AudioSection.h inspector/AudioSection.cpp
+    inspector/KeyframeControls.h inspector/KeyframeControls.cpp
     widgets/ColorButton.h   widgets/ColorButton.cpp
     panels/MediaPanel.h     panels/MediaPanel.cpp
     panels/EffectsBrowserPanel.h panels/EffectsBrowserPanel.cpp

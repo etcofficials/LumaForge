@@ -1774,6 +1774,24 @@ void TimelineView::paintClip(QPainter& p, const Clip& c, const QRectF& r, bool s
             p.drawText(QRectF(r.left() + 8, r.top() + 22, r.width() - 16 - labelReserve, 16), Qt::AlignLeft | Qt::AlignVCenter, detail);
         }
     }
+    // Keyframes: a diamond per key time along the bottom edge.
+    if (!c.animation.empty() && r.height() > 16) {
+        p.save();
+        QColor kc = selected ? pal.accent.lighter(130) : pal.accent;
+        kc.setAlpha(alpha);
+        p.setPen(QPen(QColor(0, 0, 0, alpha / 2), 1));
+        p.setBrush(kc);
+        const double y = r.bottom() - 6;
+        for (TimePoint k : keyTimes(c)) {
+            const TimePoint at = c.sequenceTimeAt(k);
+            if (at < c.start || at > c.end()) continue;   // keys outside the trimmed range
+            const double x = xFromTicks(at.ticks);
+            QPolygonF d;
+            d << QPointF(x, y - 4) << QPointF(x + 4, y) << QPointF(x, y + 4) << QPointF(x - 4, y);
+            p.drawPolygon(d);
+        }
+        p.restore();
+    }
     p.setRenderHint(QPainter::Antialiasing, false);
 }
 

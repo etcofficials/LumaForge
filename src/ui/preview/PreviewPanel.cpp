@@ -110,11 +110,10 @@ PreviewPanel::PreviewPanel(ActionRegistry& actions, PlaybackController& playback
         l->setMinimumWidth(0);
         l->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     }
-    // Timecodes never get squeezed: their width is that of the widest value.
-    for (QLabel* l : {m_currentTime, m_totalTime}) {
-        l->ensurePolished();
-        l->setMinimumWidth(l->fontMetrics().horizontalAdvance(QStringLiteral("00:00:00:00")) + 12);
-    }
+    // Timecodes never get squeezed: the size hint (styled monospace font, full
+    // timecode text) is their minimum. A width measured here would predate the
+    // style sheet's font and come out too small.
+    for (QLabel* l : {m_currentTime, m_totalTime}) l->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
 
     connect(&m_playback, &PlaybackController::positionChanged, this, [this](TimePoint) { updateTime(); });
     connect(&m_playback, &PlaybackController::playingChanged, this, [this](bool p) { updatePlaying(p); });

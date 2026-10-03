@@ -16,6 +16,10 @@ namespace {
 constexpr int kSliderSteps = 1000;
 }
 
+void ParamSlider::addLeadingWidget(QWidget* w) {
+    if (auto* row = qobject_cast<QHBoxLayout*>(layout())) row->insertWidget(0, w);
+}
+
 ParamSlider::ParamSlider(double min, double max, double defaultValue, int decimals, QWidget* parent)
     : QWidget(parent), m_value(defaultValue), m_default(defaultValue), m_sliderMin(min), m_sliderMax(max) {
     auto* row = new QHBoxLayout(this);

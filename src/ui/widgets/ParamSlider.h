@@ -22,6 +22,8 @@ public:
     void setSingleStep(double step);
     // Range of the slider can be narrower than the spin box (e.g. scale 0..4 vs 0..100).
     void setSliderRange(double min, double max);
+    // Puts a widget (e.g. a keyframe button) in front of the slider.
+    void addLeadingWidget(QWidget* w);
 
 public slots:
     void setValue(double v);   // programmatic: no signals

@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <system_error>
@@ -40,6 +41,16 @@ json write(const ColorAdjust& c) {
 json write(const std::vector<Effect>& effects) {
     json arr = json::array();
     for (const Effect& e : effects) arr.push_back({{"type", effectInfo(e.type).id}, {"enabled", e.enabled}, {"amount", e.amount}});
+    return arr;
+}
+// Keyframes: [{"prop": "positionX", "keys": [[ticks, value, "linear"], ...]}, ...]
+json writeAnimation(const std::vector<KeyTrack>& tracks) {
+    json arr = json::array();
+    for (const KeyTrack& t : tracks) {
+        json keys = json::array();
+        for (const Keyframe& k : t.keys) keys.push_back(json::array({k.time.ticks, k.value, interpId(k.interp)}));
+        arr.push_back({{"prop", animPropId(t.prop)}, {"keys", std::move(keys)}});
+    }
     return arr;
 }
 json write(const AudioParams& a) {
@@ -130,6 +141,31 @@ void read(const json& j, ColorAdjust& c) {
     get(j, "exposure", c.exposure); get(j, "brightness", c.brightness); get(j, "contrast", c.contrast); get(j, "saturation", c.saturation);
     get(j, "temperature", c.temperature); get(j, "tint", c.tint); get(j, "highlights", c.highlights); get(j, "shadows", c.shadows);
     get(j, "gamma", c.gamma); get(j, "vibrance", c.vibrance); get(j, "hue", c.hue);
+}
+void readAnimation(const json& j, std::vector<KeyTrack>& tracks) {
+    tracks.clear();
+    if (!j.is_array()) return;
+    for (const auto& item : j) {
+        if (!item.is_object()) continue;
+        std::string id;
+        get(item, "prop", id);
+        const AnimProp prop = animPropFromId(id);
+        if (prop == AnimProp::Count) continue;   // property from a newer version: dropped, not fatal
+        KeyTrack t{prop, {}};
+        if (auto keys = item.find("keys"); keys != item.end() && keys->is_array()) {
+            for (const auto& k : *keys) {
+                if (!k.is_array() || k.size() < 2 || !k[0].is_number_integer() || !k[1].is_number()) continue;
+                Keyframe key;
+                key.time = TimePoint{k[0].get<Ticks>()};
+                key.value = k[1].get<float>();
+                if (k.size() > 2 && k[2].is_string()) key.interp = interpFromId(k[2].get<std::string>());
+                t.keys.push_back(key);
+            }
+        }
+        std::sort(t.keys.begin(), t.keys.end(), [](const Keyframe& a, const Keyframe& b) { return a.time < b.time; });
+        t.keys.erase(std::unique(t.keys.begin(), t.keys.end(), [](const Keyframe& a, const Keyframe& b) { return a.time == b.time; }), t.keys.end());
+        if (!t.keys.empty()) tracks.push_back(std::move(t));
+    }
 }
 void read(const json& j, std::vector<Effect>& effects) {
     effects.clear();
@@ -230,6 +266,7 @@ std::string toJson(const Project& project, const std::string& projectDir) {
                   {"start", c.start.ticks}, {"duration", c.duration.ticks}, {"sourceIn", c.sourceIn.ticks}, {"speed", rational(c.speed)},
                   {"link", raw(c.link)}, {"transform", write(c.transform)}, {"crop", write(c.crop)}, {"color", write(c.color)},
                   {"effects", write(c.effects)}, {"audio", write(c.audio)}, {"enabled", c.enabled}};
+        if (!c.animation.empty()) j["animation"] = writeAnimation(c.animation);
         if (c.kind == ClipKind::Text) j["text"] = write(c.text);
         clips.push_back(std::move(j));
     }
@@ -317,6 +354,7 @@ Result<LoadResult> fromJson(const std::string& text, const std::string& projectD
                 if (auto s = j.find("crop"); s != j.end()) read(*s, c.crop);
                 if (auto s = j.find("color"); s != j.end()) read(*s, c.color);
                 if (auto s = j.find("effects"); s != j.end()) read(*s, c.effects);
+                if (auto s = j.find("animation"); s != j.end()) readAnimation(*s, c.animation);
                 if (auto s = j.find("audio"); s != j.end()) read(*s, c.audio);
                 if (auto s = j.find("text"); s != j.end()) read(*s, c.text);
                 // Drop clips that cannot be placed; never load an inconsistent sequence.

@@ -16,6 +16,7 @@ add_executable(lf_tests
     test_text.cpp
     test_editing.cpp
     test_library.cpp
+    test_keyframes.cpp
 )
 target_link_libraries(lf_tests PRIVATE lumaforge::core lumaforge::commands lumaforge::rendering lumaforge::media lumaforge::project lumaforge::hardware lumaforge::playback lumaforge::audio)
 target_compile_definitions(lf_tests PRIVATE LF_TEST_MEDIA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")

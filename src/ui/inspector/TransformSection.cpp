@@ -1,5 +1,6 @@
 #include "ui/inspector/TransformSection.h"
 
+#include "ui/inspector/KeyframeControls.h"
 #include "ui/widgets/ParamSlider.h"
 
 #include <QCheckBox>
@@ -14,25 +15,17 @@ namespace lf::ui {
 using namespace lf::project;
 
 namespace {
-// Wires a slider to one float on the clip: live edits merge, the gesture end closes the step.
-void bindFloat(ParamSlider* s, InspectorContext& ctx, const bool& loading, const QString& text, int propertyId, float Transform2D::*member) {
-    QObject::connect(s, &ParamSlider::valueEdited, s, [&ctx, &loading, text, propertyId, member](double v) {
-        if (loading) return;
-        ctx.editSelection(text, propertyId, [v, member](Clip& c) { c.transform.*member = static_cast<float>(v); });
-    });
-    QObject::connect(s, &ParamSlider::gestureFinished, s, [&ctx] { ctx.endGesture(); });
+// Animatable slider: ui = model * factor.
+AnimatedParam* bindAnimated(ParamSlider* s, InspectorContext& ctx, const bool& loading, const QString& text, int propertyId,
+                            std::vector<AnimProp> props, double factor) {
+    return new AnimatedParam(s, ctx, loading, std::move(props), text, propertyId, AnimatedParam::scaled(factor), AnimatedParam::unscaled(factor));
 }
-void bindCrop(ParamSlider* s, InspectorContext& ctx, const bool& loading, const QString& text, int propertyId, float Crop::*member) {
-    QObject::connect(s, &ParamSlider::valueEdited, s, [&ctx, &loading, text, propertyId, member](double v) {
-        if (loading) return;
-        // Percent in the UI, fraction in the model; opposite edges may never overlap.
-        ctx.editSelection(text, propertyId, [v, member](Clip& c) {
-            c.crop.*member = static_cast<float>(v / 100.0);
-            if (c.crop.left + c.crop.right > 0.98f) { if (member == &Crop::left) c.crop.right = 0.98f - c.crop.left; else if (member == &Crop::right) c.crop.left = 0.98f - c.crop.right; }
-            if (c.crop.top + c.crop.bottom > 0.98f) { if (member == &Crop::top) c.crop.bottom = 0.98f - c.crop.top; else if (member == &Crop::bottom) c.crop.top = 0.98f - c.crop.bottom; }
-        });
-    });
-    QObject::connect(s, &ParamSlider::gestureFinished, s, [&ctx] { ctx.endGesture(); });
+// Opposite crop edges may never overlap: the edge being edited wins.
+std::function<void(Clip&)> cropConstraint(float Crop::*member) {
+    return [member](Clip& c) {
+        if (c.crop.left + c.crop.right > 0.98f) { if (member == &Crop::left) c.crop.right = 0.98f - c.crop.left; else if (member == &Crop::right) c.crop.left = 0.98f - c.crop.right; }
+        if (c.crop.top + c.crop.bottom > 0.98f) { if (member == &Crop::top) c.crop.bottom = 0.98f - c.crop.top; else if (member == &Crop::bottom) c.crop.top = 0.98f - c.crop.bottom; }
+    };
 }
 // Picture size of a visual clip in source pixels (display orientation).
 bool sourceSize(const Project& p, const Clip& c, double& w, double& h) {
@@ -89,6 +82,7 @@ TransformSection::TransformSection(InspectorContext& ctx, QWidget* parent) : Ins
     m_rotation->setSliderRange(-180, 180);
     m_rotation->setSuffix(QStringLiteral("°"));
     m_opacity = new ParamSlider(0, 100, 100, 0, this);
+    m_opacity->setObjectName(QStringLiteral("param.opacity"));
     m_opacity->setSuffix(QStringLiteral(" %"));
     m_uniform = new QCheckBox(tr("Uniform scale"), this);
     m_uniform->setChecked(true);
@@ -146,37 +140,21 @@ TransformSection::TransformSection(InspectorContext& ctx, QWidget* parent) : Ins
     pipLayout->addStretch(1);
     f->addRow(tr("PiP"), pipRow);
 
-    bindFloat(m_posX, m_ctx, m_loading, tr("Position"), prop::PositionX, &Transform2D::positionX);
-    bindFloat(m_posY, m_ctx, m_loading, tr("Position"), prop::PositionY, &Transform2D::positionY);
-    bindFloat(m_rotation, m_ctx, m_loading, tr("Rotation"), prop::Rotation, &Transform2D::rotation);
-
+    m_params = {
+        bindAnimated(m_posX, m_ctx, m_loading, tr("Position"), prop::PositionX, {AnimProp::PositionX}, 1.0),
+        bindAnimated(m_posY, m_ctx, m_loading, tr("Position"), prop::PositionY, {AnimProp::PositionY}, 1.0),
+        bindAnimated(m_scale, m_ctx, m_loading, tr("Scale"), prop::ScaleUniform, {AnimProp::ScaleX, AnimProp::ScaleY}, 100.0),
+        bindAnimated(m_scaleX, m_ctx, m_loading, tr("Scale X"), prop::ScaleX, {AnimProp::ScaleX}, 100.0),
+        bindAnimated(m_scaleY, m_ctx, m_loading, tr("Scale Y"), prop::ScaleY, {AnimProp::ScaleY}, 100.0),
+        bindAnimated(m_rotation, m_ctx, m_loading, tr("Rotation"), prop::Rotation, {AnimProp::Rotation}, 1.0),
+        bindAnimated(m_opacity, m_ctx, m_loading, tr("Opacity"), prop::Opacity, {AnimProp::Opacity}, 100.0),
+    };
     connect(m_scale, &ParamSlider::valueEdited, this, [this](double v) {
         if (m_loading) return;
-        const float s = static_cast<float>(v / 100.0);
-        m_ctx.editSelection(tr("Scale"), prop::ScaleUniform, [s](Clip& c) { c.transform.scaleX = c.transform.scaleY = s; });
-        LoadGuard g(m_loading);
+        LoadGuard g(m_loading);   // the per-axis fields follow the uniform one
         m_scaleX->setValue(v);
         m_scaleY->setValue(v);
     });
-    connect(m_scale, &ParamSlider::gestureFinished, this, [this] { m_ctx.endGesture(); });
-    connect(m_scaleX, &ParamSlider::valueEdited, this, [this](double v) {
-        if (m_loading) return;
-        const float s = static_cast<float>(v / 100.0);
-        m_ctx.editSelection(tr("Scale X"), prop::ScaleX, [s](Clip& c) { c.transform.scaleX = s; });
-    });
-    connect(m_scaleX, &ParamSlider::gestureFinished, this, [this] { m_ctx.endGesture(); });
-    connect(m_scaleY, &ParamSlider::valueEdited, this, [this](double v) {
-        if (m_loading) return;
-        const float s = static_cast<float>(v / 100.0);
-        m_ctx.editSelection(tr("Scale Y"), prop::ScaleY, [s](Clip& c) { c.transform.scaleY = s; });
-    });
-    connect(m_scaleY, &ParamSlider::gestureFinished, this, [this] { m_ctx.endGesture(); });
-    connect(m_opacity, &ParamSlider::valueEdited, this, [this](double v) {
-        if (m_loading) return;
-        const float o = static_cast<float>(v / 100.0);
-        m_ctx.editSelection(tr("Opacity"), prop::Opacity, [o](Clip& c) { c.transform.opacity = o; });
-    });
-    connect(m_opacity, &ParamSlider::gestureFinished, this, [this] { m_ctx.endGesture(); });
     connect(m_uniform, &QCheckBox::toggled, this, [this](bool on) {
         m_scale->setVisible(on);
         m_scaleX->setVisible(!on);
@@ -258,15 +236,13 @@ void TransformSection::applyPip(Corner corner) {
 void TransformSection::load(const Clip& c, int) {
     LoadGuard guard(m_loading);
     const auto& t = c.transform;
-    m_posX->setValue(t.positionX);
-    m_posY->setValue(t.positionY);
-    m_scaleX->setValue(t.scaleX * 100.0);
-    m_scaleY->setValue(t.scaleY * 100.0);
-    m_scale->setValue(t.scaleX * 100.0);
-    const bool uniform = std::fabs(t.scaleX - t.scaleY) < 1e-4f;
+    for (auto* p : m_params) p->load(c);
+    // Uniform when both axes agree everywhere: same static value and same keys.
+    const bool uniform = std::fabs(t.scaleX - t.scaleY) < 1e-4f &&
+                         ((!findKeyTrack(c, AnimProp::ScaleX) && !findKeyTrack(c, AnimProp::ScaleY)) ||
+                          (findKeyTrack(c, AnimProp::ScaleX) && findKeyTrack(c, AnimProp::ScaleY) &&
+                           findKeyTrack(c, AnimProp::ScaleX)->keys == findKeyTrack(c, AnimProp::ScaleY)->keys));
     if (m_uniform->isChecked() != uniform) m_uniform->setChecked(uniform);
-    m_rotation->setValue(t.rotation);
-    m_opacity->setValue(std::round(t.opacity * 100.0));
     m_flipH->setChecked(t.flipH);
     m_flipV->setChecked(t.flipV);
 }
@@ -288,10 +264,14 @@ CropSection::CropSection(InspectorContext& ctx, QWidget* parent) : InspectorSect
     f->addRow(tr("Right"), m_right);
     f->addRow(tr("Top"), m_top);
     f->addRow(tr("Bottom"), m_bottom);
-    bindCrop(m_left, m_ctx, m_loading, tr("Crop"), prop::CropLeft, &Crop::left);
-    bindCrop(m_right, m_ctx, m_loading, tr("Crop"), prop::CropRight, &Crop::right);
-    bindCrop(m_top, m_ctx, m_loading, tr("Crop"), prop::CropTop, &Crop::top);
-    bindCrop(m_bottom, m_ctx, m_loading, tr("Crop"), prop::CropBottom, &Crop::bottom);
+    const std::tuple<ParamSlider*, int, AnimProp, float Crop::*> crops[] = {
+        {m_left, prop::CropLeft, AnimProp::CropLeft, &Crop::left}, {m_right, prop::CropRight, AnimProp::CropRight, &Crop::right},
+        {m_top, prop::CropTop, AnimProp::CropTop, &Crop::top}, {m_bottom, prop::CropBottom, AnimProp::CropBottom, &Crop::bottom}};
+    for (const auto& [slider, id, animProp, member] : crops) {
+        auto* p = bindAnimated(slider, m_ctx, m_loading, tr("Crop"), id, {animProp}, 100.0);
+        p->setConstraint(cropConstraint(member));
+        m_params.push_back(p);
+    }
     m_feather = new ParamSlider(0, 200, 0, 0, this);
     m_feather->setSuffix(QStringLiteral(" px"));
     m_feather->setToolTip(tr("Soft edge inside the crop, in source pixels"));
@@ -310,10 +290,7 @@ CropSection::CropSection(InspectorContext& ctx, QWidget* parent) : InspectorSect
 
 void CropSection::load(const Clip& c, int) {
     LoadGuard guard(m_loading);
-    m_left->setValue(c.crop.left * 100.0);
-    m_right->setValue(c.crop.right * 100.0);
-    m_top->setValue(c.crop.top * 100.0);
-    m_bottom->setValue(c.crop.bottom * 100.0);
+    for (auto* p : m_params) p->load(c);
     m_feather->setValue(c.crop.feather);
 }
 

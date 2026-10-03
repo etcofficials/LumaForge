@@ -10,11 +10,14 @@
 #include "ui/ActionRegistry.h"
 #include "ui/MainWindow.h"
 #include "ui/dialogs/CommandPalette.h"
+#include "ui/inspector/KeyframeControls.h"
+#include "ui/widgets/ParamSlider.h"
 #include "ui/panels/MediaPanel.h"
 #include "ui/timeline/TimelineView.h"
 
 #include <QAction>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QListView>
 #include <QListWidget>
 #include <QPushButton>
@@ -385,6 +388,51 @@ TEST_CASE("inspector tabs re-laid out when the selection changes kind (video -> 
     }
     CHECK(names.contains(QStringLiteral("Text")) && names.contains(QStringLiteral("Effects")) && names.contains(QStringLiteral("Transform")));
     CHECK(!names.contains(QStringLiteral("Audio")) && !names.contains(QStringLiteral("Video")));
+}
+
+TEST_CASE("keyframes from the inspector: diamond adds a key, edits at another time add more, undo removes") {
+    newProject();
+    focusTimeline();
+    press(Qt::Key_T, Qt::ControlModifier);                 // a 5 s title, selected, playhead at 0
+    const auto& seq = g_window->document().project().sequence;
+    CHECK(seq.clips.size() == 1);
+    if (seq.clips.empty()) return;
+    auto* opacity = g_window->findChild<ParamSlider*>(QStringLiteral("param.opacity"));
+    CHECK(opacity != nullptr);
+    if (!opacity) return;
+    auto* diamond = opacity->findChild<KeyframeButton*>();
+    auto* spin = opacity->findChild<QDoubleSpinBox*>();
+    CHECK(diamond && spin);
+    if (!diamond || !spin) return;
+    CHECK(diamond->isEnabled() && diamond->state() == KeyframeButton::State::Static);
+    diamond->click();
+    pump();
+    CHECK(project::isAnimated(seq.clips[0], project::AnimProp::Opacity));
+    CHECK(diamond->state() == KeyframeButton::State::OnKey);
+
+    timeline()->setPlayhead(TimePoint::fromSeconds(2));    // inspector follows the playhead
+    pump();
+    CHECK(diamond->state() == KeyframeButton::State::Animated);
+    spin->setValue(40);                                    // a typed edit at 2 s makes a second key
+    pump();
+    const auto* track = project::findKeyTrack(seq.clips[0], project::AnimProp::Opacity);
+    CHECK(track && track->keys.size() == 2);
+    CHECK(diamond->state() == KeyframeButton::State::OnKey);
+    CHECK(std::abs(project::valueAt(seq.clips[0], project::AnimProp::Opacity, TimePoint::fromSeconds(1)) - 0.7f) < 1e-3f);
+
+    timeline()->setPlayhead(TimePoint::fromSeconds(1));
+    pump();
+    CHECK(std::abs(spin->value() - 70.0) < 0.6);          // the field shows the animated value
+
+    focusTimeline();
+    press(Qt::Key_Z, Qt::ControlModifier);                 // undo the second key
+    track = project::findKeyTrack(seq.clips[0], project::AnimProp::Opacity);
+    CHECK(track && track->keys.size() == 1);
+    press(Qt::Key_Z, Qt::ControlModifier);                 // undo the first: static again
+    CHECK(!project::isAnimated(seq.clips[0], project::AnimProp::Opacity));
+    timeline()->setPlayhead(TimePoint::fromSeconds(30));   // outside the clip: no keyframing
+    pump();
+    CHECK(!diamond->isEnabled());
 }
 
 int main(int argc, char** argv) {

@@ -65,6 +65,7 @@ void SequenceProgram::videoLayersAt(TimePoint t, std::vector<VideoLayerRequest>&
             r.layerKey = raw(e.clip.id);
             r.transform = e.clip.transform;
             r.crop = e.clip.crop;
+            animatedTransform(e.clip, e.clip.sourceTimeAt(t), r.transform, r.crop);
             r.color = e.clip.color;
             applyEffects(e.clip.effects, r.color, r.effects);
             r.fitToFrame = true;
@@ -77,7 +78,7 @@ void SequenceProgram::videoLayersAt(TimePoint t, std::vector<VideoLayerRequest>&
 
 float SequenceProgram::gainAt(const Clip& clip, TimePoint t) noexcept {
     if (clip.audio.muted) return 0.0f;
-    float g = clip.audio.volume;
+    float g = std::max(0.0f, valueAt(clip, AnimProp::Volume, clip.sourceTimeAt(t)));
     const Ticks in = t.ticks - clip.start.ticks;
     const Ticks outT = clip.end().ticks - t.ticks;
     if (clip.audio.fadeIn.ticks > 0 && in < clip.audio.fadeIn.ticks) g *= static_cast<float>(in) / static_cast<float>(clip.audio.fadeIn.ticks);

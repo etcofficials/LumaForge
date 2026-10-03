@@ -535,6 +535,7 @@ void MainWindow::connectActions() {
         });
         m_importer->importFiles(paths, this);
     });
+    connect(m_inspectorPanel, &InspectorPanel::seekRequested, this, [this](TimePoint t) { seekTimeline(t); });
     connect(tl, &TimelineView::playheadChanged, this, [this](TimePoint t) {
         m_inspectorPanel->setPlayhead(t);
         m_statusTimecode->setText(formatTimecode(t, m_document->project().settings.frameRate));

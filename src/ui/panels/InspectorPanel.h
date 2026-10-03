@@ -38,6 +38,7 @@ public:
     void pushEdit(const QString& undoText, const EditBuilder& build) override;
     [[nodiscard]] const project::Project& project() const override { return m_doc.project(); }
     [[nodiscard]] TimePoint playhead() const override { return m_playhead; }
+    void seekTo(TimePoint t) override { emit seekRequested(t); }
 
     // Switches to the section's tab, expands and scrolls to it; false when hidden.
     bool revealSection(const QString& key);
@@ -51,7 +52,7 @@ public slots:
     void setPlayhead(lf::TimePoint t);
 
 signals:
-    void playheadDependentChanged();   // sections showing keyframes refresh on playhead moves
+    void seekRequested(lf::TimePoint t);   // keyframe navigation
 
 private:
     void addSection(InspectorSection* section);
@@ -71,6 +72,7 @@ private:
     int m_gestureSerial = 0;
     bool m_applying = false;
     TimePoint m_playhead;
+    std::vector<bool> m_insideState;   // per selected clip: playhead inside it (keyframe buttons enable)
     InspectorTab m_currentTab = InspectorTab::Transform;
     std::vector<InspectorTab> m_tabOrder;
 

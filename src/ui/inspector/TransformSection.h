@@ -7,6 +7,7 @@ class QToolButton;
 
 namespace lf::ui {
 
+class AnimatedParam;
 class ParamSlider;
 
 // Position / scale / rotation / opacity / flips for visual clips.
@@ -30,6 +31,7 @@ private:
     QCheckBox* m_uniform;
     QToolButton* m_flipH;
     QToolButton* m_flipV;
+    std::vector<AnimatedParam*> m_params;
 
     enum class Fit { Fit, Fill, Original };
     enum class Corner { TopLeft, TopRight, BottomLeft, BottomRight, Center };
@@ -53,6 +55,7 @@ private:
     ParamSlider* m_top;
     ParamSlider* m_bottom;
     ParamSlider* m_feather;
+    std::vector<AnimatedParam*> m_params;
 };
 
 }  // namespace lf::ui

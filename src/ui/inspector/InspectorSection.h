@@ -29,6 +29,8 @@ public:
     [[nodiscard]] virtual const project::Project& project() const = 0;
     // Timeline playhead (keyframes are set at the playhead).
     [[nodiscard]] virtual TimePoint playhead() const = 0;
+    // Moves the timeline playhead (keyframe navigation).
+    virtual void seekTo(TimePoint t) = 0;
 };
 
 // Inspector tabs; a section lives in exactly one.
@@ -68,6 +70,7 @@ protected:
         void pushEdit(const QString& undoText, const EditBuilder& build) override { m_inner.pushEdit(undoText, build); }
         [[nodiscard]] const project::Project& project() const override { return m_inner.project(); }
         [[nodiscard]] TimePoint playhead() const override { return m_inner.playhead(); }
+        void seekTo(TimePoint t) override { m_inner.seekTo(t); }
 
     private:
         InspectorContext& m_inner;
@@ -92,7 +95,7 @@ enum : int {
     TextShadowOffsetY, TextShadowBlur, TextBackground, TextBackgroundColor, TextBackgroundOpacity, TextPadding, TextPreset,
     Volume, Mute, FadeIn, FadeOut,
     Speed,
-    CropFeather, Pan, Preset,
+    CropFeather, Pan, Preset, Keyframe,
     ResetGroup = 900,
 };
 }
