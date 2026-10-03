@@ -206,6 +206,7 @@ private:
     double m_pixelsPerSecond = 40.0;
     Ticks m_scrollTicks = 0;
     bool m_snapping = true;
+    bool m_pendingFit = false;
     int m_hoverX = -1;
     std::vector<Lane> m_lanes;
     std::vector<project::ClipId> m_selection;

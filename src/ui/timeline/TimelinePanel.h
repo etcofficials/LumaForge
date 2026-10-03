@@ -23,6 +23,9 @@ public:
     TimelinePanel(project::Document& doc, ActionRegistry& actions, QWidget* parent = nullptr);
     ~TimelinePanel() override;
 
+    // The panel title strip; MainWindow uses it as the dock title bar.
+    [[nodiscard]] PanelHeader* header() const noexcept { return m_header; }
+
     [[nodiscard]] TimelineView* view() const noexcept { return m_view; }
 
 private:

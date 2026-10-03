@@ -4,6 +4,12 @@ qt_add_library(lf_ui STATIC
     ActionRegistry.h        ActionRegistry.cpp
     Timecode.h              Timecode.cpp
     MainWindow.h            MainWindow.cpp
+    AppPaths.h              AppPaths.cpp
+    home/HomeScreen.h       home/HomeScreen.cpp
+    workspace/WorkspaceManager.h workspace/WorkspaceManager.cpp
+    widgets/ToastHost.h     widgets/ToastHost.cpp
+    panels/BrowserPanel.h   panels/BrowserPanel.cpp
+    panels/ProjectInfoPanel.h panels/ProjectInfoPanel.cpp
     widgets/PanelHeader.h   widgets/PanelHeader.cpp
     widgets/EmptyState.h    widgets/EmptyState.cpp
     widgets/CollapsibleSection.h widgets/CollapsibleSection.cpp

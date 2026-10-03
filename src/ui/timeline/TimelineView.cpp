@@ -338,6 +338,9 @@ void TimelineView::zoomIn() { setZoom(m_pixelsPerSecond * 1.5, static_cast<int>(
 void TimelineView::zoomOut() { setZoom(m_pixelsPerSecond / 1.5, static_cast<int>(xFromTicks(m_playhead.ticks))); }
 
 void TimelineView::zoomToFit() {
+    // Not laid out yet (hidden dock, first show): fit once there is a real width.
+    if (width() - headerWidth() < 120) { m_pendingFit = true; return; }
+    m_pendingFit = false;
     const int px = std::max(1, width() - headerWidth() - 24);
     const double seconds = std::max(1.0, (m_sequenceDuration.isZero() ? Duration::fromSeconds(60) : m_sequenceDuration).toSeconds());
     m_scrollTicks = 0;
@@ -846,6 +849,7 @@ void TimelineView::wheelEvent(QWheelEvent* e) {
 
 void TimelineView::resizeEvent(QResizeEvent* e) {
     QWidget::resizeEvent(e);
+    if (m_pendingFit && width() - headerWidth() >= 120) zoomToFit();
     clampScroll();
     emit viewChanged();
 }

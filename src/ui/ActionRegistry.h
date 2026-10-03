@@ -16,7 +16,7 @@ namespace lf::ui {
 // ActionRegistry.cpp. Nothing else in the codebase hard-codes a shortcut.
 enum class ActionId {
     // Project
-    ProjectNew, ProjectOpen, ProjectSave, ProjectSaveAs, ProjectSettings, AppQuit,
+    ProjectNew, ProjectOpen, ProjectSave, ProjectSaveAs, ProjectSettings, ProjectClose, AppQuit,
     // Media
     MediaImport,
     // Edit
@@ -33,6 +33,8 @@ enum class ActionId {
     Export,
     // View / Help
     ViewDiagnostics, ViewPerformance, HelpAbout,
+    // Workspaces
+    WorkspaceEdit, WorkspaceColor, WorkspaceAudio, WorkspaceText, WorkspaceEffects, WorkspaceExport, WorkspaceReset,
 };
 
 class ActionRegistry : public QObject {

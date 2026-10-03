@@ -12,24 +12,38 @@
 #include <memory>
 #include <optional>
 
+class QDockWidget;
 class QLabel;
 class QMenu;
-class QSplitter;
+class QStackedWidget;
+class QTabBar;
+class QTimer;
 
 namespace lf::hw { class GpuDevice; }
+namespace lf::playback { struct PlaybackStats; }
 
 namespace lf::ui {
 
 class ActionRegistry;
+class BrowserPanel;
 class DiagnosticsDialog;
+class HomeScreen;
 class ImportController;
 class InspectorPanel;
 class MediaPanel;
 class PlaybackController;
 class PreviewPanel;
 class ProjectController;
+class ProjectInfoPanel;
 class TimelinePanel;
+class ToastHost;
+class WorkspaceManager;
+enum class Workspace;
 
+// Top-level window. Two pages: the Home screen (no project open) and the
+// editor, a nested QMainWindow whose docks (browser, inspector, timeline,
+// mixer, scopes, export...) are arranged by the WorkspaceManager around the
+// central viewer. Menus and the status bar belong to this outer window.
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -47,6 +61,8 @@ public:
     // Opens a .lfproj (asks about unsaved changes first).
     void openProjectFile(const QString& path);
 
+    [[nodiscard]] ToastHost* toasts() const noexcept { return m_toasts; }
+
 protected:
     void closeEvent(QCloseEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -55,13 +71,17 @@ protected:
 private:
     void buildMenus();
     void buildToolBar();
+    void buildWorkspaceBar();
+    void buildPanels();
     void buildStatusBar();
-    void buildCentralLayout();
     void connectActions();
+    QDockWidget* makeDock(const QString& title, const QString& objectName, QWidget* content, QWidget* titleBar);
     void updateUndoActions();
     void updateWindowTitle();
+    void updateStatusProject();
+    void updateStatusStats(const playback::PlaybackStats& stats);
+    void sampleMemory();
     void showDiagnostics(const QString& tab = {});
-    void notYetAvailable(const QString& feature);
     void onDocumentChange(const project::Change& change);
     void rebuildRecentMenu();
     void showProjectSettings();
@@ -69,6 +89,14 @@ private:
     void refreshSequenceProgram();
     // Switches the preview to the timeline (no-op when already there).
     void showSequenceInPreview(TimePoint at);
+    void onWorkspaceChanged(Workspace w);
+
+    // Pages
+    void showHome();
+    void showEditor();
+    [[nodiscard]] bool editorVisible() const;
+    void newProjectFromHome();
+    void closeProject();
 
     std::shared_ptr<hw::GpuDevice> m_gpu;
     std::shared_ptr<log::RingBufferSink> m_logSink;
@@ -81,20 +109,33 @@ private:
     PlaybackController* m_playback = nullptr;
     ProjectController* m_project = nullptr;
     QMenu* m_recentMenu = nullptr;
+    QMenu* m_panelsMenu = nullptr;
     std::shared_ptr<const playback::Program> m_sequenceProgram;
     bool m_sequenceRefreshPending = false;
 
-    QSplitter* m_mainSplitter = nullptr;
-    QSplitter* m_topSplitter = nullptr;
+    QStackedWidget* m_pages = nullptr;
+    HomeScreen* m_home = nullptr;
+    QMainWindow* m_editor = nullptr;
+    QTabBar* m_workspaceBar = nullptr;
+    WorkspaceManager* m_workspaces = nullptr;
+    ToastHost* m_toasts = nullptr;
+    bool m_layoutRestored = false;
+
+    BrowserPanel* m_browser = nullptr;
     MediaPanel* m_mediaPanel = nullptr;
+    ProjectInfoPanel* m_projectInfo = nullptr;
     PreviewPanel* m_previewPanel = nullptr;
     InspectorPanel* m_inspectorPanel = nullptr;
     TimelinePanel* m_timelinePanel = nullptr;
     QPointer<DiagnosticsDialog> m_diagnostics;
 
+    QLabel* m_statusProject = nullptr;
+    QLabel* m_statusTimecode = nullptr;
+    QLabel* m_statusPlayback = nullptr;
+    QLabel* m_statusDecoder = nullptr;
     QLabel* m_statusHardware = nullptr;
-    QLabel* m_statusPreview = nullptr;
-    QLabel* m_statusFps = nullptr;
+    QLabel* m_statusMemory = nullptr;
+    QTimer* m_memoryTimer = nullptr;
 };
 
 }  // namespace lf::ui

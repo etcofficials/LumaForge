@@ -53,6 +53,7 @@ const ActionDef kActions[] = {
     {ActionId::ProjectSave,     "projectSave",     "&Save",               "save",   QKeySequence::Save,   "Save the project"},
     {ActionId::ProjectSaveAs,   "projectSaveAs",   "Save &As...",         nullptr,  QKeySequence::SaveAs, "Save the project to a new file"},
     {ActionId::ProjectSettings, "projectSettings", "Project S&ettings...", nullptr, Shortcut{},      "Change resolution and frame rate"},
+    {ActionId::ProjectClose,    "projectClose",    "&Close Project",      nullptr,  Shortcut{Qt::CTRL | Qt::Key_W}, "Close the project and return to the Home screen"},
     {ActionId::AppQuit,         "appQuit",         "E&xit",               nullptr,  Shortcut{Qt::CTRL | Qt::Key_Q}, "Quit LumaForge"},
 
     {ActionId::MediaImport,     "mediaImport",     "&Import Media...",    "import", Shortcut{Qt::CTRL | Qt::Key_I}, "Import video, audio or images"},
@@ -88,6 +89,14 @@ const ActionDef kActions[] = {
     {ActionId::ViewDiagnostics, "viewDiagnostics", "&Diagnostics...",     "diagnostics", Shortcut{}, "System information, hardware acceleration and logs"},
     {ActionId::ViewPerformance, "viewPerformance", "&Performance Monitor", nullptr, Shortcut{}, "Show live performance counters", true, false},
     {ActionId::HelpAbout,       "helpAbout",       "&About LumaForge",    nullptr,  Shortcut{}, "Version and licence information"},
+
+    {ActionId::WorkspaceEdit,    "workspaceEdit",    "&Edit",            nullptr, Shortcut{Qt::ALT | Qt::SHIFT | Qt::Key_1}, "Editing layout: browser, viewer, inspector, timeline", true},
+    {ActionId::WorkspaceColor,   "workspaceColor",   "&Color",           nullptr, Shortcut{Qt::ALT | Qt::SHIFT | Qt::Key_2}, "Colour layout: large viewer and colour controls", true},
+    {ActionId::WorkspaceAudio,   "workspaceAudio",   "&Audio",           nullptr, Shortcut{Qt::ALT | Qt::SHIFT | Qt::Key_3}, "Audio layout: tall timeline and audio controls", true},
+    {ActionId::WorkspaceText,    "workspaceText",    "&Text",            nullptr, Shortcut{Qt::ALT | Qt::SHIFT | Qt::Key_4}, "Titles layout: title presets and text controls", true},
+    {ActionId::WorkspaceEffects, "workspaceEffects", "E&ffects",         nullptr, Shortcut{Qt::ALT | Qt::SHIFT | Qt::Key_5}, "Effects layout: effects browser and effect controls", true},
+    {ActionId::WorkspaceExport,  "workspaceExport",  "E&xport",          nullptr, Shortcut{Qt::ALT | Qt::SHIFT | Qt::Key_6}, "Export layout: export settings and queue", true},
+    {ActionId::WorkspaceReset,   "workspaceReset",   "&Reset Layout",    nullptr, Shortcut{}, "Restore the default panel layout of the current workspace"},
 };
 }  // namespace
 
@@ -110,6 +119,10 @@ ActionRegistry::ActionRegistry(QObject* parent) : QObject(parent) {
     tools->addAction(action(ActionId::ToolSelect));
     tools->addAction(action(ActionId::ToolBlade));
     action(ActionId::ToolSelect)->setChecked(true);
+    auto* workspaces = new QActionGroup(this);
+    workspaces->setExclusive(true);
+    for (auto id : {ActionId::WorkspaceEdit, ActionId::WorkspaceColor, ActionId::WorkspaceAudio, ActionId::WorkspaceText, ActionId::WorkspaceEffects, ActionId::WorkspaceExport})
+        workspaces->addAction(action(id));
     qApp->installEventFilter(this);
 }
 

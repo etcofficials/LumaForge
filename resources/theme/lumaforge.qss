@@ -291,3 +291,40 @@ QPlainTextEdit[log="true"] {
     font-size: 9pt;
     background: {{bg.input}};
 }
+
+/* ---------------------------------------------------------------- docks / workspaces */
+QMainWindow::separator {
+    background: {{bg.window}};
+    width: {{splitterWidth}}px;
+    height: {{splitterWidth}}px;
+}
+QMainWindow::separator:hover { background: {{accent}}; }
+QDockWidget {
+    color: {{text.secondary}};
+    titlebar-close-icon: none;
+}
+QDockWidget::title {
+    background: {{bg.header}};
+    padding: 4px 8px;
+    border-bottom: 1px solid {{border}};
+}
+QToolBar#workspaceBar {
+    min-height: 26px;
+    padding: 0 6px;
+    background: {{bg.window}};
+}
+QTabBar#workspaceTabs::tab {
+    background: transparent;
+    color: {{text.secondary}};
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 4px 14px;
+    margin-right: 2px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+QTabBar#workspaceTabs::tab:selected { color: {{text.primary}}; border-bottom: 2px solid {{accent}}; }
+QTabBar#workspaceTabs::tab:hover:!selected { color: {{text.primary}}; background: {{bg.hover}}; }
+QTabWidget#browserTabs::pane { border: none; }
+QStatusBar QLabel[statusField="true"] { border-left: 1px solid {{border}}; }
+QWidget#homeScreen QPushButton { padding: 6px 12px; }

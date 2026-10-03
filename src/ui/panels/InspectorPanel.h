@@ -25,6 +25,9 @@ public:
     explicit InspectorPanel(project::Document& doc, QWidget* parent = nullptr);
     ~InspectorPanel() override;
 
+    // The panel title strip; MainWindow uses it as the dock title bar.
+    [[nodiscard]] PanelHeader* header() const noexcept { return m_header; }
+
     // InspectorContext
     void editSelection(const QString& undoText, int propertyId, const ClipEdit& fn) override;
     void endGesture() override;

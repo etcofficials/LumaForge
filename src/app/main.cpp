@@ -6,6 +6,7 @@
 #include "lumaforge/diagnostics/SystemInfo.h"
 #include "lumaforge/hardware/GpuDevice.h"
 #include "lumaforge/hardware/HardwareDetector.h"
+#include "ui/AppPaths.h"
 #include "ui/MainWindow.h"
 #include "ui/Theme.h"
 
@@ -20,10 +21,9 @@
 
 namespace {
 
-// Logs live next to the executable while LumaForge is in development so
-// nothing accumulates in the user profile; a packaged build will switch to
-// the per-user data directory.
-std::shared_ptr<lf::log::RingBufferSink> initLogging(const QString& appDir) {
+// Logs go to the LumaForge data folder (G:\LumaForgeData\Logs on the
+// development machine), never to the user profile.
+std::shared_ptr<lf::log::RingBufferSink> initLogging(const QString& logDir) {
     using namespace lf::log;
     auto& logger = Logger::instance();
 #ifndef NDEBUG
@@ -31,9 +31,9 @@ std::shared_ptr<lf::log::RingBufferSink> initLogging(const QString& appDir) {
 #else
     logger.setMinimumLevel(Level::Info);
 #endif
-    QDir dir(appDir);
-    dir.mkpath(QStringLiteral("logs"));
-    const QString path = dir.filePath(QStringLiteral("logs/lumaforge.log"));
+    QDir dir(logDir);
+    dir.mkpath(QStringLiteral("."));
+    const QString path = dir.filePath(QStringLiteral("lumaforge.log"));
     auto file = std::make_shared<FileSink>(path.toStdWString());
     if (file->isOpen()) logger.addSink(file);
     logger.addSink(std::make_shared<DebuggerSink>());
@@ -53,11 +53,12 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/app.svg")));
 
-    // Portable settings file beside the executable (see note in initLogging).
+    // Portable settings file beside the executable: nothing in the registry or the user profile.
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, QCoreApplication::applicationDirPath());
+    lf::ui::AppPaths::initialise();
 
-    auto logSink = initLogging(QCoreApplication::applicationDirPath());
+    auto logSink = initLogging(lf::ui::AppPaths::path(lf::ui::AppPaths::Kind::Logs));
     const auto sys = lf::diag::querySystem();
     LF_LOG_INFO("app", "LumaForge {} ({}) starting", lf::version::string, lf::version::buildType);
     LF_LOG_INFO("app", "{} | {} cores | {} RAM | {} {} | Qt {} | {}", sys.cpu.brand, sys.cpu.logicalProcessors,
