@@ -2,6 +2,7 @@
 
 #include "lumaforge/core/Time.h"
 #include "lumaforge/media/AudioDecoder.h"
+#include "lumaforge/playback/AudioDsp.h"
 #include "lumaforge/playback/Program.h"
 
 #include <atomic>
@@ -35,13 +36,25 @@ public:
     // Audio device callback: fills `frames` interleaved frames.
     void render(float* out, int frames);
 
+    // Peak levels (linear, 0..1+) since the last call, per audio track and for
+    // the master bus; resets the peaks. Safe from any thread.
+    struct Levels {
+        std::vector<std::pair<std::uint64_t, float>> tracks;   // trackKey -> peak
+        float master = 0.0f;
+    };
+    Levels takeLevels();
+
 private:
     struct ClipReader {
         std::unique_ptr<media::AudioDecoder> decoder;
         std::uint64_t lastUsedGeneration = 0;
         bool failed = false;
+        dsp::Equalizer eq;
+        dsp::Compressor compressor;
+        dsp::Gate gate;
     };
     ClipReader* readerFor(const AudioClipRequest& req);
+    void mixClip(ClipReader& reader, const AudioClipRequest& req, int frames);
     void pruneReaders();
 
     int m_rate;
@@ -57,6 +70,11 @@ private:
     std::vector<float> m_scratch;
     std::vector<float> m_speedScratch;
     std::vector<AudioClipRequest> m_requests;
+    std::unordered_map<std::uint64_t, std::vector<float>> m_trackMix;   // per-track bus for the current block
+    dsp::Limiter m_limiter;
+    std::mutex m_levelMutex;
+    std::unordered_map<std::uint64_t, float> m_trackPeaks;
+    float m_masterPeak = 0.0f;
 };
 
 }  // namespace lf::playback

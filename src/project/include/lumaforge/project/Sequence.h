@@ -7,6 +7,7 @@
 #include "lumaforge/project/Ids.h"
 #include "lumaforge/project/Transitions.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -24,6 +25,8 @@ struct Track {
     bool locked = false;       // no edits
     bool solo = false;
     int height = 0;            // lane height in the timeline, pixels; 0 = default for the kind
+    float volume = 1.0f;       // audio tracks: linear gain applied to the track's mix
+    float pan = 0.0f;          // audio tracks: -1 left .. 1 right
     bool subtitles = false;    // video track holding subtitle cues (text clips); see Subtitles.h
     friend bool operator==(const Track&, const Track&) = default;
 };
@@ -36,11 +39,27 @@ enum class ClipKind { Video, Audio, Image, Text, Solid, Adjustment };
 // Made by LumaForge itself rather than read from a media file.
 [[nodiscard]] constexpr bool isGeneratedClip(ClipKind k) noexcept { return k == ClipKind::Text || k == ClipKind::Solid || k == ClipKind::Adjustment; }
 
+// Per-clip audio processing, applied before the clip's gain and pan.
+struct AudioFx {
+    float eqLow = 0.0f;            // dB, low shelf at 120 Hz
+    float eqMid = 0.0f;            // dB, peak at 1 kHz
+    float eqHigh = 0.0f;           // dB, high shelf at 8 kHz
+    bool compressor = false;
+    float compThreshold = -18.0f;  // dBFS
+    float compRatio = 3.0f;        // n:1
+    bool gate = false;
+    float gateThreshold = -50.0f;  // dBFS: quieter than this is muted
+    [[nodiscard]] constexpr bool isIdentity() const noexcept { return eqLow == 0.0f && eqMid == 0.0f && eqHigh == 0.0f && !compressor && !gate; }
+    friend constexpr bool operator==(const AudioFx&, const AudioFx&) = default;
+};
+
 struct AudioParams {
     float volume = 1.0f;       // linear gain; the UI shows dB
     bool muted = false;
     Duration fadeIn;
     Duration fadeOut;
+    float pan = 0.0f;          // -1 left .. 1 right (equal power)
+    AudioFx fx;
     friend constexpr bool operator==(const AudioParams&, const AudioParams&) = default;
 };
 
@@ -58,6 +77,8 @@ struct Clip {
     Rational speed{1, 1};                // >0; 2/1 = double speed
     ClipId link = ClipId::Invalid;       // A/V partner created from the same media
     bool enabled = true;                 // disabled clips stay on the timeline but are not rendered or heard
+    bool reverse = false;                // plays its media range backwards
+    bool freeze = false;                 // holds the frame at sourceIn (frame hold); silent
 
     Transform2D transform;
     Crop crop;
@@ -75,13 +96,19 @@ struct Clip {
     [[nodiscard]] constexpr TimeRange range() const noexcept { return {start, duration}; }
     [[nodiscard]] constexpr bool contains(TimePoint t) const noexcept { return range().contains(t); }
 
-    // Sequence time -> media time (exact integer arithmetic).
+    // Sequence time -> media time (exact integer arithmetic). Reversed clips run
+    // from the end of their media range back to sourceIn; frozen ones hold sourceIn.
     [[nodiscard]] constexpr TimePoint sourceTimeAt(TimePoint t) const noexcept {
+        if (freeze) return sourceIn;
         const Ticks offset = t.ticks - start.ticks;
-        return TimePoint{sourceIn.ticks + offset * speed.num / speed.den};
+        const Ticks forward = offset * speed.num / speed.den;
+        if (reverse) return TimePoint{std::max(sourceIn.ticks, sourceIn.ticks + duration.ticks * speed.num / speed.den - 1 - forward)};
+        return TimePoint{sourceIn.ticks + forward};
     }
-    // Media time -> sequence time (inverse of sourceTimeAt).
+    // Media time -> sequence time (inverse of sourceTimeAt; frozen clips map to their start).
     [[nodiscard]] constexpr TimePoint sequenceTimeAt(TimePoint source) const noexcept {
+        if (freeze) return start;
+        if (reverse) return TimePoint{start.ticks + (sourceIn.ticks + duration.ticks * speed.num / speed.den - 1 - source.ticks) * speed.den / speed.num};
         return TimePoint{start.ticks + (source.ticks - sourceIn.ticks) * speed.den / speed.num};
     }
     [[nodiscard]] constexpr Duration sourceDuration() const noexcept { return Duration{duration.ticks * speed.num / speed.den}; }
@@ -91,6 +118,26 @@ struct Clip {
 
     friend bool operator==(const Clip&, const Clip&) = default;
 };
+
+// The same clip covering [newStart, newEnd) on the timeline and showing the
+// same media at every sequence time it still covers - forward, reversed or
+// frozen. Trims, splits and rolls all go through this.
+[[nodiscard]] inline Clip retimed(const Clip& c, TimePoint newStart, TimePoint newEnd) noexcept {
+    Clip n = c;
+    n.start = newStart;
+    n.duration = newEnd - newStart;
+    if (c.freeze) return n;
+    if (!c.reverse) {
+        n.sourceIn = TimePoint{c.sourceIn.ticks + (newStart.ticks - c.start.ticks) * c.speed.num / c.speed.den};
+    } else {
+        // Reversed: the end of the media range plays first. Keep the top sample
+        // aligned with the same sequence time, then derive sourceIn.
+        const Ticks top = c.sourceIn.ticks + c.duration.ticks * c.speed.num / c.speed.den;
+        const Ticks newTop = top + (c.start.ticks - newStart.ticks) * c.speed.num / c.speed.den;
+        n.sourceIn = TimePoint{newTop - n.duration.ticks * c.speed.num / c.speed.den};
+    }
+    return n;
+}
 
 // ---- keyframe helpers (Animation.cpp). `source` is media time; values are in
 // model units (fractions for crop/opacity, 1 = 100% for scale, linear volume).
@@ -160,6 +207,8 @@ struct Sequence {
     TimePoint markIn{-1};    // In/Out range (loop, lift/extract, export range); -1 = unset
     TimePoint markOut{-1};
     std::vector<Marker> markers;   // sorted by time
+    float masterVolume = 1.0f;     // linear gain of the final mix
+    bool masterLimiter = true;     // keep the final mix below 0 dBFS without hard clipping
 
     [[nodiscard]] bool hasInOut() const noexcept { return markIn.ticks >= 0 && markOut.ticks > markIn.ticks; }
 

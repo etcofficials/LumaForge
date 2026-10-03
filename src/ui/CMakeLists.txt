@@ -31,6 +31,7 @@ qt_add_library(lf_ui STATIC
     panels/TitlesBrowserPanel.h panels/TitlesBrowserPanel.cpp
     panels/TransitionsBrowserPanel.h panels/TransitionsBrowserPanel.cpp
     panels/MarkersPanel.h panels/MarkersPanel.cpp
+    panels/MixerPanel.h panels/MixerPanel.cpp
     export/ExportController.h export/ExportController.cpp
     export/ExportSettingsPanel.h export/ExportSettingsPanel.cpp
     export/ExportQueuePanel.h export/ExportQueuePanel.cpp

@@ -5,6 +5,7 @@
 #include "lumaforge/playback/Program.h"
 #include "lumaforge/rendering/Compositor.h"
 #include "lumaforge/rendering/PreviewRenderer.h"
+#include "lumaforge/playback/AudioMixer.h"
 #include "lumaforge/playback/LayerFactory.h"
 #include "lumaforge/rendering/TextRasterizer.h"
 
@@ -94,6 +95,8 @@ public:
     [[nodiscard]] PlaybackStats stats() const;
     [[nodiscard]] render::Compositor& compositor() noexcept { return *m_compositor; }
     [[nodiscard]] bool audioAvailable() const noexcept { return m_audio != nullptr; }
+    // Peak levels of the preview mix since the last call (meters).
+    [[nodiscard]] AudioMixer::Levels takeAudioLevels() { return m_mixer ? m_mixer->takeLevels() : AudioMixer::Levels{}; }
 
 private:
     PlaybackEngine() = default;

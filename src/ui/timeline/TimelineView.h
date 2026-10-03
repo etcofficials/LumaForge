@@ -100,6 +100,7 @@ public slots:
     // 5 s Solid or Adjustment clip at the playhead on the topmost video track free there.
     void addGeneratedClip(lf::project::ClipKind kind);
     void addMarker();                 // at the playhead
+    void addFrameHold();              // 2 s hold of the frame at the playhead in the selected (or topmost) video clip
     void renameMarker(std::uint64_t id);
     [[nodiscard]] static QColor markerColor(int index);
     [[nodiscard]] static int markerColorCount();

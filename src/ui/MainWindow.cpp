@@ -28,6 +28,7 @@
 #include "ui/panels/TitlesBrowserPanel.h"
 #include "ui/panels/TransitionsBrowserPanel.h"
 #include "ui/panels/MarkersPanel.h"
+#include "ui/panels/MixerPanel.h"
 #include "ui/export/ExportController.h"
 #include "ui/export/ExportQueuePanel.h"
 #include "ui/export/ExportSettingsPanel.h"
@@ -223,7 +224,7 @@ void MainWindow::buildMenus() {
     auto* clip = menuBar()->addMenu(tr("&Clip"));
     add(clip, {ActionId::EditCut, ActionId::ClipSplit, ActionId::ClipTrimStartToPlayhead, ActionId::ClipTrimEndToPlayhead, ActionId::ClipRippleDelete});
     clip->addSeparator();
-    add(clip, {ActionId::ClipSpeed, ActionId::ClipAddTransition, ActionId::ClipProperties, ActionId::ClipRevealInMedia});
+    add(clip, {ActionId::ClipSpeed, ActionId::ClipFrameHold, ActionId::ClipAddTransition, ActionId::ClipProperties, ActionId::ClipRevealInMedia});
     clip->addSeparator();
     auto* nudge = clip->addMenu(tr("&Nudge"));
     add(nudge, {ActionId::ClipNudgeLeft, ActionId::ClipNudgeRight, ActionId::ClipNudgeLeftLarge, ActionId::ClipNudgeRightLarge});
@@ -404,6 +405,7 @@ void MainWindow::buildPanels() {
     m_titlesBrowser = new TitlesBrowserPanel(this);
     m_transitionsBrowser = new TransitionsBrowserPanel(this);
     m_markersPanel = new MarkersPanel(*m_document, *m_actions, this);
+    m_mixerPanel = new MixerPanel(*m_document, *m_playback, this);
     m_exportController = new ExportController(m_gpu, this);
     m_exportSettings = new ExportSettingsPanel(*m_document, *m_exportController, this);
     m_exportQueue = new ExportQueuePanel(*m_exportController, this);
@@ -427,6 +429,8 @@ void MainWindow::buildPanels() {
     m_workspaces->registerDock(DockId::Timeline, timelineDock);
     auto* exportSettingsDock = makeDock(tr("Export Settings"), QStringLiteral("exportSettingsDock"), m_exportSettings, nullptr);
     auto* exportQueueDock = makeDock(tr("Render Queue"), QStringLiteral("exportQueueDock"), m_exportQueue, nullptr);
+    auto* mixerDock = makeDock(tr("Mixer"), QStringLiteral("mixerDock"), m_mixerPanel, nullptr);
+    m_workspaces->registerDock(DockId::Mixer, mixerDock);
     m_workspaces->registerDock(DockId::ExportSettings, exportSettingsDock);
     m_workspaces->registerDock(DockId::ExportQueue, exportQueueDock);
     m_workspaces->setAvailable(Workspace::Export, true);

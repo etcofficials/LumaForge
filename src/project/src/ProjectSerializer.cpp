@@ -54,7 +54,12 @@ json writeAnimation(const std::vector<KeyTrack>& tracks) {
     return arr;
 }
 json write(const AudioParams& a) {
-    return {{"volume", a.volume}, {"muted", a.muted}, {"fadeIn", a.fadeIn.ticks}, {"fadeOut", a.fadeOut.ticks}};
+    json j = {{"volume", a.volume}, {"muted", a.muted}, {"fadeIn", a.fadeIn.ticks}, {"fadeOut", a.fadeOut.ticks}, {"pan", a.pan}};
+    if (!a.fx.isIdentity()) {
+        j["fx"] = {{"eqLow", a.fx.eqLow}, {"eqMid", a.fx.eqMid}, {"eqHigh", a.fx.eqHigh}, {"compressor", a.fx.compressor}, {"compThreshold", a.fx.compThreshold},
+                   {"compRatio", a.fx.compRatio}, {"gate", a.fx.gate}, {"gateThreshold", a.fx.gateThreshold}};
+    }
+    return j;
 }
 const char* alignName(TextAlign a) { return a == TextAlign::Left ? "left" : a == TextAlign::Right ? "right" : "center"; }
 json write(const TextParams& t) {
@@ -211,7 +216,14 @@ void read(const json& j, std::vector<Effect>& effects) {
     if (sharpen > 0) { Effect e = makeEffect(EffectType::Sharpen); e.amount = sharpen; effects.push_back(e); }
     if (vignette > 0) { Effect e = makeEffect(EffectType::Vignette); e.amount = vignette; effects.push_back(e); }
 }
-void read(const json& j, AudioParams& a) { get(j, "volume", a.volume); get(j, "muted", a.muted); getTicks(j, "fadeIn", a.fadeIn); getTicks(j, "fadeOut", a.fadeOut); }
+void read(const json& j, AudioParams& a) {
+    get(j, "volume", a.volume); get(j, "muted", a.muted); getTicks(j, "fadeIn", a.fadeIn); getTicks(j, "fadeOut", a.fadeOut); get(j, "pan", a.pan);
+    if (auto fx = j.find("fx"); fx != j.end() && fx->is_object()) {
+        get(*fx, "eqLow", a.fx.eqLow); get(*fx, "eqMid", a.fx.eqMid); get(*fx, "eqHigh", a.fx.eqHigh);
+        get(*fx, "compressor", a.fx.compressor); get(*fx, "compThreshold", a.fx.compThreshold); get(*fx, "compRatio", a.fx.compRatio);
+        get(*fx, "gate", a.fx.gate); get(*fx, "gateThreshold", a.fx.gateThreshold);
+    }
+}
 void read(const json& j, TextParams& t) {
     get(j, "text", t.text); get(j, "fontFamily", t.fontFamily); get(j, "fontSize", t.fontSize); get(j, "bold", t.bold); get(j, "italic", t.italic);
     getColor(j, "color", t.color);
@@ -284,6 +296,7 @@ std::string toJson(const Project& project, const std::string& projectDir) {
     for (const auto& t : project.sequence.tracks) {
         json jt = {{"id", raw(t.id)}, {"kind", trackKindKey(t.kind)}, {"name", t.name}, {"muted", t.muted}, {"locked", t.locked}, {"solo", t.solo}, {"height", t.height}};
         if (t.subtitles) jt["subtitles"] = true;
+        if (t.kind == TrackKind::Audio) { jt["volume"] = t.volume; jt["pan"] = t.pan; }
         tracks.push_back(std::move(jt));
     }
     json clips = json::array();
@@ -292,6 +305,8 @@ std::string toJson(const Project& project, const std::string& projectDir) {
                   {"start", c.start.ticks}, {"duration", c.duration.ticks}, {"sourceIn", c.sourceIn.ticks}, {"speed", rational(c.speed)},
                   {"link", raw(c.link)}, {"transform", write(c.transform)}, {"crop", write(c.crop)}, {"color", write(c.color)},
                   {"effects", write(c.effects)}, {"audio", write(c.audio)}, {"enabled", c.enabled}};
+        if (c.reverse) j["reverse"] = true;
+        if (c.freeze) j["freeze"] = true;
         if (!c.animation.empty()) j["animation"] = writeAnimation(c.animation);
         if (c.mask.isActive()) {
             j["mask"] = {{"shape", c.mask.shape == MaskShape::Ellipse ? "ellipse" : "rectangle"}, {"centerX", c.mask.centerX}, {"centerY", c.mask.centerY},
@@ -304,7 +319,8 @@ std::string toJson(const Project& project, const std::string& projectDir) {
         clips.push_back(std::move(j));
     }
     root["sequence"] = {{"tracks", std::move(tracks)}, {"clips", std::move(clips)},
-                        {"markIn", project.sequence.markIn.ticks}, {"markOut", project.sequence.markOut.ticks}, {"markers", std::move(markers)}};
+                        {"markIn", project.sequence.markIn.ticks}, {"markOut", project.sequence.markOut.ticks}, {"markers", std::move(markers)},
+                        {"masterVolume", project.sequence.masterVolume}, {"masterLimiter", project.sequence.masterLimiter}};
     return root.dump(2);
 }
 
@@ -367,6 +383,8 @@ Result<LoadResult> fromJson(const std::string& text, const std::string& projectD
                 Track t;
                 getId(j, "id", t.id); get(j, "name", t.name); get(j, "muted", t.muted); get(j, "locked", t.locked); get(j, "solo", t.solo);
                 get(j, "subtitles", t.subtitles);
+                get(j, "volume", t.volume);
+                get(j, "pan", t.pan);
                 get(j, "height", t.height);
                 t.height = std::clamp(t.height, 0, 400);
                 std::string kind = "video";
@@ -388,6 +406,8 @@ Result<LoadResult> fromJson(const std::string& text, const std::string& projectD
                 }
                 getTicks(j, "start", c.start); getTicks(j, "duration", c.duration); getTicks(j, "sourceIn", c.sourceIn); getRational(j, "speed", c.speed);
                 get(j, "enabled", c.enabled);
+                get(j, "reverse", c.reverse);
+                get(j, "freeze", c.freeze);
                 if (auto s = j.find("transform"); s != j.end()) read(*s, c.transform);
                 if (auto s = j.find("crop"); s != j.end()) read(*s, c.crop);
                 if (auto s = j.find("color"); s != j.end()) read(*s, c.color);
@@ -438,6 +458,8 @@ Result<LoadResult> fromJson(const std::string& text, const std::string& projectD
                 for (std::size_t k = 0; k < i; ++k) if (p.sequence.markers[k].id == p.sequence.markers[i].id || p.sequence.markers[i].id == 0) { p.sequence.markers[i].id = next++; break; }
             }
         }
+        get(*seq, "masterVolume", p.sequence.masterVolume);
+        get(*seq, "masterLimiter", p.sequence.masterLimiter);
         getTicks(*seq, "markIn", p.sequence.markIn);
         getTicks(*seq, "markOut", p.sequence.markOut);
         if (!p.sequence.hasInOut() && (p.sequence.markIn.ticks >= 0 || p.sequence.markOut.ticks >= 0)) {

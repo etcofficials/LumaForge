@@ -89,6 +89,7 @@ TimelinePanel::TimelinePanel(project::Document& doc, ActionRegistry& actions, QW
     actions.connect(ActionId::EditDuplicate, this, [this] { m_view->duplicateSelection(); });
     actions.connect(ActionId::TimelineAddText, this, [this] { m_view->addTextClip(); });
     actions.connect(ActionId::MarkerAdd, this, [this] { m_view->addMarker(); });
+    actions.connect(ActionId::ClipFrameHold, this, [this] { m_view->addFrameHold(); });
     actions.connect(ActionId::TimelineAddSolid, this, [this] { m_view->addGeneratedClip(project::ClipKind::Solid); });
     actions.connect(ActionId::TimelineAddAdjustment, this, [this] { m_view->addGeneratedClip(project::ClipKind::Adjustment); });
     actions.connect(ActionId::ClipAddTransition, this, [this] { m_view->addTransition(project::TransitionType::CrossDissolve, project::kDefaultTransitionDuration); });
@@ -242,6 +243,7 @@ void TimelinePanel::updateActionState() {
     m_actions.action(ActionId::AudioMuteClip)->setChecked(m_view->selectionAudioMuted());
     for (auto id : {ActionId::VideoTransform, ActionId::VideoCrop, ActionId::VideoColor, ActionId::VideoEffects, ActionId::ClipAddTransition})
         m_actions.setEnabled(id, m_view->selectionHasVisual());
+    m_actions.setEnabled(ActionId::ClipFrameHold, !m_doc.project().sequence.clips.empty());
     m_actions.setEnabled(ActionId::ClipTrimStartToPlayhead, m_view->canTrimToPlayhead());
     m_actions.setEnabled(ActionId::ClipTrimEndToPlayhead, m_view->canTrimToPlayhead());
     m_actions.setEnabled(ActionId::ClipLift, seq.hasInOut() && hasClips);

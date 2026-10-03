@@ -3,6 +3,7 @@
 #include "lumaforge/core/Rational.h"
 #include "lumaforge/core/Time.h"
 #include "lumaforge/core/VisualParams.h"
+#include "lumaforge/project/Sequence.h"
 
 #include <cstdint>
 #include <memory>
@@ -35,7 +36,13 @@ struct AudioClipRequest {
     std::uint64_t clipKey = 0;   // identity of the clip instance (readers are per clip)
     TimePoint sourceTime;        // media time corresponding to the program time asked for
     double speed = 1.0;
+    bool reverse = false;        // media plays backwards: sourceTime is the latest sample of the block
     float gain = 1.0f;           // linear, after fades/mute
+    float pan = 0.0f;            // clip pan, -1..1
+    project::AudioFx fx;         // clip processing (EQ, compressor, gate)
+    std::uint64_t trackKey = 0;  // the audio track (bus) this clip feeds
+    float trackGain = 1.0f;      // that track's volume
+    float trackPan = 0.0f;       // that track's pan
 };
 
 // An immutable description of what plays: the playback engine and the
@@ -58,6 +65,10 @@ public:
 
     // Changes rarely; lets the engine drop readers for media no longer used.
     [[nodiscard]] virtual std::vector<std::string> mediaPaths() const = 0;
+
+    // Final mix stage.
+    [[nodiscard]] virtual float masterGain() const { return 1.0f; }
+    [[nodiscard]] virtual bool masterLimiter() const { return false; }
 };
 
 }  // namespace lf::playback

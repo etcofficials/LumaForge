@@ -143,6 +143,15 @@ SequenceEdit addTransition(const Sequence& seq, const std::vector<ClipId>& ids, 
 // The transition currently at that edge (looking at the touching clip for the end), if any.
 [[nodiscard]] std::optional<Transition> transitionAt(const Sequence& seq, ClipId id, bool atStart);
 
+// ---- reverse / frame hold
+// Sets reverse on the clips and their linked partners (unlocked tracks only).
+SequenceEdit setReverse(const Sequence& seq, const std::vector<ClipId>& ids, bool reverse);
+// Frame hold: splits the video clip at `at` and inserts a `hold`-long frozen
+// copy showing the frame at `at`; everything after on unlocked tracks moves
+// right by `hold` (linked audio gets a silent gap). Empty when `at` is not
+// strictly inside the clip.
+SequenceEdit addFrameHold(Document& doc, ClipId id, TimePoint at, Duration hold);
+
 // ---- markers
 // Adds a marker at `time` (no-op when one is already there); the name defaults to "Marker N".
 SequenceEdit addMarker(const Sequence& seq, TimePoint time, std::string name = {});

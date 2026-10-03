@@ -691,6 +691,26 @@ void TimelineView::addMarker() {
     if (!edit.empty()) commit(tr("Add Marker"), std::move(edit));
 }
 
+void TimelineView::addFrameHold() {
+    const auto& seq = m_doc.project().sequence;
+    // The selected video clip under the playhead, else the topmost one there.
+    const Clip* target = nullptr;
+    for (auto id : m_selection) if (const Clip* c = seq.findClip(id); c && c->kind == ClipKind::Video && m_playhead > c->start && m_playhead < c->end()) target = c;
+    if (!target) {
+        for (const auto& t : seq.tracks) {
+            if (t.kind != TrackKind::Video || t.locked || target) continue;
+            if (const Clip* c = seq.clipAt(t.id, m_playhead); c && c->kind == ClipKind::Video && m_playhead > c->start) target = c;
+        }
+    }
+    if (!target) return;
+    SequenceEdit edit = ops::addFrameHold(m_doc, target->id, m_playhead, Duration::fromSeconds(2));
+    if (edit.empty()) return;
+    ClipId hold = ClipId::Invalid;
+    for (const auto& c : edit.added) if (c.freeze) hold = c.id;
+    commit(tr("Add Frame Hold"), std::move(edit));
+    if (isValid(hold)) setSelection({hold});
+}
+
 void TimelineView::renameMarker(std::uint64_t id) {
     const auto& seq = m_doc.project().sequence;
     for (const auto& m : seq.markers) {

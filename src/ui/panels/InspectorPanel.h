@@ -39,6 +39,7 @@ public:
     [[nodiscard]] const project::Project& project() const override { return m_doc.project(); }
     [[nodiscard]] TimePoint playhead() const override { return m_playhead; }
     void seekTo(TimePoint t) override { emit seekRequested(t); }
+    [[nodiscard]] std::vector<project::ClipId> selectionIds() const override { return m_selection; }
 
     // Switches to the section's tab, expands and scrolls to it; false when hidden.
     bool revealSection(const QString& key);

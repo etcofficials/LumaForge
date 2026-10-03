@@ -30,20 +30,16 @@ bool contains(const std::vector<ClipId>& ids, ClipId id) { return std::find(ids.
 
 // Right-hand piece of a clip cut at `time` with a fresh id.
 Clip rightPiece(const Clip& c, TimePoint time, ClipId newId) {
-    Clip right = c;
+    Clip right = retimed(c, time, c.end());
     right.id = newId;
     right.link = ClipId::Invalid;
-    right.start = time;
-    right.sourceIn = c.sourceTimeAt(time);
-    right.duration = c.end() - time;
     right.audio.fadeIn = Duration::zero();
     right.transitionIn.reset();   // the new cut starts as a plain cut
     return right;
 }
 
 Clip leftPiece(const Clip& c, TimePoint time) {
-    Clip left = c;
-    left.duration = time - c.start;
+    Clip left = retimed(c, c.start, time);
     left.audio.fadeOut = Duration::zero();
     left.transitionOut.reset();
     return left;
@@ -68,15 +64,9 @@ void overwriteRangeImpl(Document& doc, TrackId track, TimeRange range, const std
             pieces.emplace_back(c.id, right.id);
             edit.add(std::move(right));
         } else if (c.start < rs) {
-            Clip left = c;
-            left.duration = rs - c.start;
-            edit.modify(std::move(left));
+            edit.modify(retimed(c, c.start, rs));
         } else {
-            Clip right = c;
-            right.sourceIn = c.sourceTimeAt(re);
-            right.duration = c.end() - re;
-            right.start = re;
-            edit.modify(std::move(right));
+            edit.modify(retimed(c, re, c.end()));
         }
     }
 }
@@ -232,28 +222,33 @@ std::optional<Duration> mediaDuration(const Project& project, const Clip& clip) 
 
 namespace {
 
+// How far the media lets the clip extend: earliest start and latest end on
+// the timeline (unbounded for stills, generated and frozen clips).
+std::pair<Ticks, Ticks> extentLimits(const Project& project, const Clip& c) {
+    constexpr Ticks kFar = std::numeric_limits<Ticks>::max() / 4;
+    if (c.freeze) return {-kFar, kFar};
+    const auto md = mediaDuration(project, c);
+    const Ticks before = c.timelineDurationFor(Duration{c.sourceIn.ticks}).ticks;   // media before sourceIn
+    const Ticks after = md ? c.timelineDurationFor(*md - Duration{c.sourceOut().ticks}).ticks : kFar;   // media after sourceOut
+    // Forward: the head shows media before sourceIn, the tail media after sourceOut; reversed swaps them.
+    if (!c.reverse) return {c.start.ticks - before, md ? c.end().ticks + after : kFar};
+    return {md ? c.start.ticks - after : -kFar, c.end().ticks + before};
+}
+
 // Trims one clip; returns the new clip (or nullopt if nothing changed).
 std::optional<Clip> trimmed(const Project& project, const Clip& c, Edge edge, TimePoint time) {
     const Duration frame = frameDuration(project.settings.frameRate);
+    const auto [minStart, maxEnd] = extentLimits(project, c);
     Clip n = c;
     if (edge == Edge::Start) {
-        Ticks lo = 0;
-        // Cannot reveal media before its first sample.
-        lo = std::max<Ticks>(lo, c.start.ticks - c.timelineDurationFor(Duration{c.sourceIn.ticks}).ticks);
+        const Ticks lo = std::max<Ticks>(0, minStart);
         const Ticks hi = c.end().ticks - frame.ticks;
         const Ticks ns = std::clamp(time.ticks, std::min(lo, hi), hi);
-        n.start = TimePoint{ns};
-        n.sourceIn = c.sourceTimeAt(n.start);
-        n.duration = c.end() - n.start;
+        n = retimed(c, TimePoint{ns}, c.end());
     } else {
-        Ticks hi = std::numeric_limits<Ticks>::max() / 4;
-        if (auto md = mediaDuration(project, c)) {
-            const Duration remaining = *md - Duration{c.sourceIn.ticks};
-            hi = c.start.ticks + c.timelineDurationFor(remaining).ticks;
-        }
         const Ticks lo = c.start.ticks + frame.ticks;
-        const Ticks ne = std::clamp(time.ticks, lo, std::max(lo, hi));
-        n.duration = TimePoint{ne} - c.start;
+        const Ticks ne = std::clamp(time.ticks, lo, std::max(lo, maxEnd));
+        n = retimed(c, c.start, TimePoint{ne});
     }
     if (n.start == c.start && n.duration == c.duration) return std::nullopt;
     return n;
@@ -507,14 +502,15 @@ SequenceEdit rippleTrim(Document& doc, ClipId id, Edge edge, TimePoint time) {
     for (const Clip* t : trimmedClips) {
         Clip m = *t;
         if (edge == Edge::Start) {
-            // Head trim by d: content starts later in the source, start stays put.
+            // Head trim by d: the content now starting later in the clip moves back to the clip's start.
             const Duration d{-delta};
-            m.sourceIn = t->sourceTimeAt(t->start + d);
-            m.duration = t->duration - d;
+            if (t->duration.ticks - d.ticks <= 0) return {};
+            m = retimed(*t, t->start + d, t->end());
+            m.start = t->start;
         } else {
-            m.duration = Duration{t->duration.ticks + delta};
+            if (t->duration.ticks + delta <= 0) return {};
+            m = retimed(*t, t->start, TimePoint{t->end().ticks + delta});
         }
-        if (m.duration.ticks <= 0) return {};
         edit.modify(std::move(m));
     }
     for (const Clip& o : seq.clips) {
@@ -565,24 +561,17 @@ SequenceEdit rollEdit(Document& doc, ClipId leftId, ClipId rightId, TimePoint ti
     for (const auto& [a, b] : cuts) {
         lo = std::max(lo, a->start.ticks + frame.ticks);
         hi = std::min(hi, b->end().ticks - frame.ticks);
-        // Left clip cannot extend past the end of its media...
-        if (auto md = mediaDuration(project, *a)) hi = std::min(hi, a->start.ticks + a->timelineDurationFor(*md - Duration{a->sourceIn.ticks}).ticks);
-        // ...and the right clip cannot reveal media before its first sample.
-        lo = std::max(lo, b->start.ticks - b->timelineDurationFor(Duration{b->sourceIn.ticks}).ticks);
+        // The left clip cannot run past its media, nor the right one start before it.
+        hi = std::min(hi, extentLimits(project, *a).second);
+        lo = std::max(lo, extentLimits(project, *b).first);
     }
     if (lo > hi) return {};
     const Ticks cut = std::clamp(time.ticks, lo, hi);
     if (cut == l->end().ticks) return {};
     SequenceEdit edit;
     for (const auto& [a, b] : cuts) {
-        Clip na = *a;
-        na.duration = TimePoint{cut} - a->start;
-        Clip nb = *b;
-        nb.sourceIn = b->sourceTimeAt(TimePoint{cut});
-        nb.duration = b->end() - TimePoint{cut};
-        nb.start = TimePoint{cut};
-        edit.modify(std::move(na));
-        edit.modify(std::move(nb));
+        edit.modify(retimed(*a, a->start, TimePoint{cut}));
+        edit.modify(retimed(*b, TimePoint{cut}, b->end()));
     }
     return edit;
 }
@@ -863,6 +852,57 @@ std::optional<Transition> transitionAt(const Sequence& seq, ClipId id, bool atSt
     if (!c) return std::nullopt;
     const auto [owner, inSide] = transitionOwner(seq, *c, atStart);
     return inSide ? owner->transitionIn : owner->transitionOut;
+}
+
+// ---------------------------------------------------------------- reverse / frame hold
+
+SequenceEdit setReverse(const Sequence& seq, const std::vector<ClipId>& ids, bool reverse) {
+    SequenceEdit edit;
+    for (auto id : withLinked(seq, ids)) {
+        const Clip* c = seq.findClip(id);
+        if (!c || c->reverse == reverse || isGeneratedClip(c->kind) || c->kind == ClipKind::Image) continue;
+        if (const Track* t = seq.findTrack(c->track); !t || t->locked) continue;
+        Clip n = *c;
+        n.reverse = reverse;
+        edit.modify(std::move(n));
+    }
+    return edit;
+}
+
+SequenceEdit addFrameHold(Document& doc, ClipId id, TimePoint at, Duration hold) {
+    const auto& seq = doc.project().sequence;
+    const Clip* c = seq.findClip(id);
+    if (!c || c->kind != ClipKind::Video || hold.ticks <= 0 || !(at > c->start && at < c->end())) return {};
+    if (const Track* t = seq.findTrack(c->track); !t || t->locked) return {};
+    SequenceEdit edit = splitClips(doc, {id}, at);
+    if (edit.added.empty()) return {};
+    // Everything from `at` on unlocked tracks (including the new right pieces) moves right.
+    for (auto& a : edit.added) a.start = TimePoint{a.start.ticks + hold.ticks};
+    for (const Clip& o : seq.clips) {
+        if (o.start < at) continue;
+        bool already = false;
+        for (const auto& m : edit.modified) already |= m.id == o.id;
+        if (already) continue;
+        if (const Track* t = seq.findTrack(o.track); !t || t->locked) continue;
+        Clip m = o;
+        m.start = TimePoint{o.start.ticks + hold.ticks};
+        edit.modify(std::move(m));
+    }
+    Clip frozen = *c;
+    frozen.id = doc.allocateClipId();
+    frozen.link = ClipId::Invalid;
+    frozen.start = at;
+    frozen.duration = hold;
+    frozen.sourceIn = c->sourceTimeAt(at);
+    frozen.freeze = true;
+    frozen.reverse = false;
+    frozen.speed = Rational{1, 1};
+    frozen.name = c->name + " (hold)";
+    frozen.transitionIn.reset();
+    frozen.transitionOut.reset();
+    frozen.animation.clear();
+    edit.add(std::move(frozen));
+    return edit;
 }
 
 // ---------------------------------------------------------------- markers

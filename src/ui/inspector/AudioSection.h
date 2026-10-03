@@ -24,6 +24,17 @@ public:
 private:
     ParamSlider* m_volume;
     AnimatedParam* m_volumeParam = nullptr;
+    ParamSlider* m_pan;
+    ParamSlider* m_eqLow;
+    ParamSlider* m_eqMid;
+    ParamSlider* m_eqHigh;
+    QCheckBox* m_comp;
+    ParamSlider* m_compThreshold;
+    ParamSlider* m_compRatio;
+    QCheckBox* m_gate;
+    ParamSlider* m_gateThreshold;
+    QToolButton* m_normalize;
+    void normalize();
     QCheckBox* m_mute;
     ParamSlider* m_fadeIn;
     ParamSlider* m_fadeOut;
@@ -43,6 +54,7 @@ private:
     void apply(Rational speed);
     std::vector<QToolButton*> m_presets;
     ParamSlider* m_custom;
+    QCheckBox* m_reverse;
 };
 
 }  // namespace lf::ui

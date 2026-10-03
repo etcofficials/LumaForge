@@ -22,6 +22,8 @@ public:
     void videoLayersAt(TimePoint t, std::vector<VideoLayerRequest>& out) const override;
     void audioClipsAt(TimePoint t, std::vector<AudioClipRequest>& out) const override;
     [[nodiscard]] std::vector<std::string> mediaPaths() const override;
+    [[nodiscard]] float masterGain() const override { return m_masterGain; }
+    [[nodiscard]] bool masterLimiter() const override { return m_limiter; }
 
     // Gain including fades and mute for a clip at sequence time t.
     static float gainAt(const project::Clip& clip, TimePoint t) noexcept;
@@ -43,6 +45,8 @@ private:
     struct AudioEntry {
         project::Clip clip;
         std::string path;
+        float trackGain = 1.0f;
+        float trackPan = 0.0f;
     };
     // Visual clips grouped per video track, bottom-up; each list sorted by start.
     std::vector<std::vector<VisualEntry>> m_videoTracks;
@@ -53,6 +57,8 @@ private:
     Rational m_frameRate;
     int m_width = 1920, m_height = 1080;
     bool m_hasAudio = false;
+    float m_masterGain = 1.0f;
+    bool m_limiter = true;
 };
 
 }  // namespace lf::playback

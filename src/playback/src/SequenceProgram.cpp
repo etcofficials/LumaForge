@@ -55,13 +55,15 @@ SequenceProgram::SequenceProgram(const Project& project)
     for (const Track* track : seq.audioTracks()) {
         if (track->muted || (anySolo && !track->solo)) continue;
         for (const Clip& c : seq.clips) {
-            if (c.track != track->id || c.kind != ClipKind::Audio || !c.enabled) continue;
+            if (c.track != track->id || c.kind != ClipKind::Audio || !c.enabled || c.freeze) continue;
             const MediaItem* item = project.findMedia(c.media);
             if (!item || item->offline || !item->info.hasAudio()) continue;
-            m_audioClips.push_back({c, item->path});
+            m_audioClips.push_back({c, item->path, track->volume, track->pan});
         }
     }
     m_hasAudio = !m_audioClips.empty();
+    m_masterGain = seq.masterVolume;
+    m_limiter = seq.masterLimiter;
 
     for (const auto& track : m_videoTracks) for (const auto& e : track) if (!e.path.empty()) m_paths.push_back(e.path);
     for (const auto& a : m_audioClips) m_paths.push_back(a.path);
@@ -217,7 +219,13 @@ void SequenceProgram::audioClipsAt(TimePoint t, std::vector<AudioClipRequest>& o
         r.clipKey = raw(a.clip.id);
         r.sourceTime = a.clip.sourceTimeAt(t);
         r.speed = a.clip.speed.toDouble();
+        r.reverse = a.clip.reverse;
         r.gain = gainAt(a.clip, t);
+        r.pan = a.clip.audio.pan;
+        r.fx = a.clip.audio.fx;
+        r.trackKey = raw(a.clip.track);
+        r.trackGain = a.trackGain;
+        r.trackPan = a.trackPan;
         out.push_back(std::move(r));
     }
 }

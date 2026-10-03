@@ -31,6 +31,8 @@ public:
     [[nodiscard]] virtual TimePoint playhead() const = 0;
     // Moves the timeline playhead (keyframe navigation).
     virtual void seekTo(TimePoint t) = 0;
+    // The selected clip ids (read-only).
+    [[nodiscard]] virtual std::vector<project::ClipId> selectionIds() const = 0;
 };
 
 // Inspector tabs; a section lives in exactly one.
@@ -71,6 +73,7 @@ protected:
         [[nodiscard]] const project::Project& project() const override { return m_inner.project(); }
         [[nodiscard]] TimePoint playhead() const override { return m_inner.playhead(); }
         void seekTo(TimePoint t) override { m_inner.seekTo(t); }
+        [[nodiscard]] std::vector<project::ClipId> selectionIds() const override { return m_inner.selectionIds(); }
 
     private:
         InspectorContext& m_inner;
@@ -85,6 +88,7 @@ protected:
 // Property ids for undo merging. Each control gets its own id.
 namespace prop {
 enum : int {
+    None = 0,
     Name = 1,
     PositionX, PositionY, ScaleX, ScaleY, ScaleUniform, Rotation, Opacity, FlipH, FlipV,
     CropLeft, CropRight, CropTop, CropBottom,
@@ -98,6 +102,7 @@ enum : int {
     CropFeather, Pan, Preset, Keyframe,
     MaskShape, MaskCenterX, MaskCenterY, MaskWidth, MaskHeight, MaskFeather, MaskInvert,
     SolidColor,
+    EqLow, EqMid, EqHigh, Gate, GateThreshold, Compressor, CompThreshold, CompRatio,
     ResetGroup = 900,
 };
 }

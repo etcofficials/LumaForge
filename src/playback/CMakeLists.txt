@@ -6,12 +6,16 @@ add_library(lf_playback STATIC
     include/lumaforge/playback/AudioMixer.h
     include/lumaforge/playback/PlaybackEngine.h
     include/lumaforge/playback/LayerFactory.h
+    include/lumaforge/playback/AudioDsp.h
+    include/lumaforge/playback/AudioAnalysis.h
     src/SourceProgram.cpp
     src/SequenceProgram.cpp
     src/VideoReader.cpp
     src/AudioMixer.cpp
     src/PlaybackEngine.cpp
     src/LayerFactory.cpp
+    src/AudioDsp.cpp
+    src/AudioAnalysis.cpp
 )
 add_library(lumaforge::playback ALIAS lf_playback)
 target_include_directories(lf_playback PUBLIC include)

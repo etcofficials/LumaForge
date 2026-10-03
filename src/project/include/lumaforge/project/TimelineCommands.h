@@ -19,6 +19,12 @@ struct SequenceMarks {
     friend constexpr bool operator==(const SequenceMarks&, const SequenceMarks&) = default;
 };
 
+struct MasterBus {
+    float volume = 1.0f;
+    bool limiter = true;
+    friend constexpr bool operator==(const MasterBus&, const MasterBus&) = default;
+};
+
 struct SequenceEdit {
     std::vector<Clip> added;        // inserted as given (ids pre-allocated)
     std::vector<ClipId> removed;
@@ -26,13 +32,14 @@ struct SequenceEdit {
     std::vector<Track> tracks;      // complete new state of existing tracks
     std::optional<SequenceMarks> marks;   // new In/Out points
     std::optional<std::vector<Marker>> markers;   // complete new marker list (sorted)
+    std::optional<MasterBus> master;              // final mix volume / limiter
     // Structural track changes. Applied in this order: remove, insert, reorder, then `tracks`.
     std::vector<TrackId> tracksRemoved;
     std::vector<std::pair<std::size_t, Track>> tracksAdded;   // display index at insertion time + track
     std::optional<std::vector<TrackId>> trackOrder;           // complete new display order
 
     [[nodiscard]] bool touchesTracks() const noexcept { return !tracks.empty() || !tracksRemoved.empty() || !tracksAdded.empty() || trackOrder.has_value(); }
-    [[nodiscard]] bool empty() const noexcept { return added.empty() && removed.empty() && modified.empty() && !touchesTracks() && !marks && !markers; }
+    [[nodiscard]] bool empty() const noexcept { return added.empty() && removed.empty() && modified.empty() && !touchesTracks() && !marks && !markers && !master; }
     // Affected clip ids (for change notifications and selection).
     [[nodiscard]] std::vector<ClipId> clipIds() const;
     void add(Clip c) { added.push_back(std::move(c)); }
@@ -70,6 +77,7 @@ private:
     std::vector<Track> m_tracksBefore;   // the whole track list (tracks are few)
     SequenceMarks m_marksBefore;
     std::vector<Marker> m_markersBefore;
+    MasterBus m_masterBefore;
 };
 
 }  // namespace lf::project
