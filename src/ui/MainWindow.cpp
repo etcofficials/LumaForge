@@ -32,6 +32,7 @@
 #include "ui/panels/MarkersPanel.h"
 #include "ui/panels/MixerPanel.h"
 #include "ui/panels/ScopesPanel.h"
+#include "ui/panels/PerformancePanel.h"
 #include "ui/export/ExportController.h"
 #include "ui/export/ExportQueuePanel.h"
 #include "ui/export/ExportSettingsPanel.h"
@@ -332,7 +333,11 @@ void MainWindow::buildToolBar() {
         m_toolbarFps = new QLabel(tb);
         m_toolbarFps->setProperty("chip", true);
         m_toolbarFps->setText(tr("— fps"));
-        m_toolbarFps->setToolTip(tr("Preview frames per second and dropped frames while playing"));
+        m_toolbarFps->setToolTip(tr("Preview frames per second and dropped frames while playing · click for the Performance panel"));
+        m_toolbarHw->installEventFilter(this);
+        m_toolbarFps->installEventFilter(this);
+        m_toolbarHw->setCursor(Qt::PointingHandCursor);
+        m_toolbarFps->setCursor(Qt::PointingHandCursor);
         ToolbarGroup g{QStringLiteral("performance"), tr("Performance"), {}};
         g.items << tb->addWidget(m_toolbarHw) << tb->addWidget(m_toolbarFps);
         m_toolbarGroups.push_back(g);
@@ -417,6 +422,7 @@ void MainWindow::buildPanels() {
     m_markersPanel = new MarkersPanel(*m_document, *m_actions, this);
     m_mixerPanel = new MixerPanel(*m_document, *m_playback, this);
     m_scopesPanel = new ScopesPanel(*m_playback, this);
+    m_performancePanel = new PerformancePanel(*m_document, *m_playback, *m_proxies, *m_actions, this);
     m_exportController = new ExportController(m_gpu, this);
     m_exportSettings = new ExportSettingsPanel(*m_document, *m_exportController, this);
     m_exportQueue = new ExportQueuePanel(*m_exportController, this);
@@ -444,6 +450,8 @@ void MainWindow::buildPanels() {
     m_workspaces->registerDock(DockId::Mixer, mixerDock);
     auto* scopesDock = makeDock(tr("Scopes"), QStringLiteral("scopesDock"), m_scopesPanel, nullptr);
     m_workspaces->registerDock(DockId::Scopes, scopesDock);
+    m_performanceDock = makeDock(tr("Performance"), QStringLiteral("performanceDock"), m_performancePanel, nullptr);
+    m_workspaces->registerDock(DockId::Performance, m_performanceDock);
     m_workspaces->registerDock(DockId::ExportSettings, exportSettingsDock);
     m_workspaces->registerDock(DockId::ExportQueue, exportQueueDock);
     m_workspaces->setAvailable(Workspace::Export, true);
@@ -1020,6 +1028,7 @@ void MainWindow::setHardwareReport(hw::HwReport report) {
     else parts << tr("CPU encode");
     m_statusHardware->setText(parts.join(QStringLiteral(" · ")));
     m_exportSettings->setEncoderProbes(r.encoders);
+    m_performancePanel->setHardwareReport(r);
     m_toolbarHw->setText(parts.join(QStringLiteral(" · ")));
     QString tip;
     if (const auto* a = r.activeAdapter()) tip = QString::fromStdString(a->name) + QLatin1Char('\n');
@@ -1212,6 +1221,11 @@ void MainWindow::setViewerFullscreen(bool on) {
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if ((watched == m_toolbarHw || watched == m_toolbarFps) && event->type() == QEvent::MouseButtonRelease && m_performanceDock) {
+        m_performanceDock->show();
+        m_performanceDock->raise();
+        return true;
+    }
     if (m_viewerFullscreen && event->type() == QEvent::KeyPress && static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape) {
         setViewerFullscreen(false);
         return true;

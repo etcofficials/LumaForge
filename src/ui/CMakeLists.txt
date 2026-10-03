@@ -33,6 +33,7 @@ qt_add_library(lf_ui STATIC
     panels/MarkersPanel.h panels/MarkersPanel.cpp
     panels/MixerPanel.h panels/MixerPanel.cpp
     panels/ScopesPanel.h panels/ScopesPanel.cpp
+    panels/PerformancePanel.h panels/PerformancePanel.cpp
     export/ExportController.h export/ExportController.cpp
     export/ExportSettingsPanel.h export/ExportSettingsPanel.cpp
     export/ExportQueuePanel.h export/ExportQueuePanel.cpp

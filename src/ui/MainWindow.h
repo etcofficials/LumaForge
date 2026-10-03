@@ -45,6 +45,7 @@ class MarkersPanel;
 class MixerPanel;
 class ProxyController;
 class ScopesPanel;
+class PerformancePanel;
 class ExportController;
 class ExportSettingsPanel;
 class ExportQueuePanel;
@@ -155,6 +156,8 @@ private:
     MixerPanel* m_mixerPanel = nullptr;
     ProxyController* m_proxies = nullptr;
     ScopesPanel* m_scopesPanel = nullptr;
+    PerformancePanel* m_performancePanel = nullptr;
+    QDockWidget* m_performanceDock = nullptr;
     ExportController* m_exportController = nullptr;
     ExportSettingsPanel* m_exportSettings = nullptr;
     ExportQueuePanel* m_exportQueue = nullptr;
