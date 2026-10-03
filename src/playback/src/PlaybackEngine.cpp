@@ -40,6 +40,7 @@ Result<std::unique_ptr<PlaybackEngine>> PlaybackEngine::create(std::shared_ptr<h
     auto comp = render::Compositor::create(e->m_gpu);
     if (!comp) return comp.error();
     e->m_compositor = std::move(comp.value());
+    e->m_layerFactory = std::make_unique<LayerFactory>(e->m_compositor->texturePoolPtr());
 
     e->m_mixer = std::make_unique<AudioMixer>(kMixerRate, kMixerChannels);
     audio::AudioOutput::Options ao;
@@ -321,60 +322,6 @@ void PlaybackEngine::pruneReaders() {
     }
 }
 
-std::shared_ptr<render::FrameTexture> PlaybackEngine::textTextureFor(const TextParams& text, int frameW, int frameH) {
-    const std::uint64_t key = render::TextRasterizer::hash(text, frameW, frameH);
-    if (auto it = m_textCache.find(key); it != m_textCache.end()) {
-        it->second.lastUse = ++m_textUseCounter;
-        return it->second.texture;
-    }
-    if (m_textUnavailable) return nullptr;
-    if (!m_text) {
-        auto created = render::TextRasterizer::create();
-        if (!created) {
-            LF_LOG_ERROR(kLog, "text rendering unavailable: {}", created.error().fullText());
-            m_textUnavailable = true;
-            return nullptr;
-        }
-        m_text = std::move(created.value());
-    }
-    auto bitmap = m_text->render(text, frameW, frameH);
-    if (!bitmap) {
-        LF_LOG_WARN(kLog, "text render failed: {}", bitmap.error().fullText());
-        return nullptr;
-    }
-    auto tex = m_compositor->texturePoolPtr()->acquireBgra(bitmap->width, bitmap->height, true);
-    if (!tex) {
-        LF_LOG_WARN(kLog, "text texture failed: {}", tex.error().fullText());
-        return nullptr;
-    }
-    if (auto s = (*tex)->fillBgra(bitmap->bgra.data(), bitmap->width * 4, true); !s) {
-        LF_LOG_WARN(kLog, "text upload failed: {}", s.error().fullText());
-        return nullptr;
-    }
-    // Bounded: a title change per slider tick must not accumulate 8 MB textures.
-    constexpr std::size_t kMaxTextTextures = 6;
-    while (m_textCache.size() >= kMaxTextTextures) {
-        auto oldest = std::min_element(m_textCache.begin(), m_textCache.end(), [](const auto& a, const auto& b) { return a.second.lastUse < b.second.lastUse; });
-        m_textCache.erase(oldest);
-    }
-    m_textCache[key] = TextEntry{*tex, ++m_textUseCounter};
-    return *tex;
-}
-
-std::shared_ptr<render::FrameTexture> PlaybackEngine::solidTextureFor(const ColorRgba& color) {
-    auto channel = [](float v) { return static_cast<std::uint32_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
-    const std::uint32_t bgra = channel(color.b) | (channel(color.g) << 8) | (channel(color.r) << 16) | (channel(color.a) << 24);
-    if (auto it = m_solidCache.find(bgra); it != m_solidCache.end()) return it->second;
-    constexpr int kSize = 16;
-    auto tex = m_compositor->texturePoolPtr()->acquireBgra(kSize, kSize, true);
-    if (!tex) return nullptr;
-    std::vector<std::uint32_t> pixels(kSize * kSize, bgra);
-    if (!(*tex)->fillBgra(reinterpret_cast<const std::uint8_t*>(pixels.data()), kSize * 4, false)) return nullptr;
-    if (m_solidCache.size() > 8) m_solidCache.clear();
-    m_solidCache[bgra] = *tex;
-    return *tex;
-}
-
 void PlaybackEngine::ensureTarget(int frameW, int frameH) {
     int w = frameW, h = frameH;
     auto scaleToHeight = [&](int targetH) {
@@ -427,48 +374,9 @@ void PlaybackEngine::renderOnce(TimePoint t, bool vsync) {
     bool starved = false;
     std::string decoderName = "-";
     for (const auto& req : m_layerRequests) {
-        if (req.path.empty() && req.solid) {
-            // Generated colour layer (dip transitions): a tiny texture stretched over the frame.
-            auto tex = solidTextureFor(*req.solid);
-            if (!tex) continue;
-            render::Layer layer;
-            layer.texture = std::move(tex);
-            layer.transform = req.transform;
-            layer.transform.scaleX *= std::max(1.0f, static_cast<float>(fw) / static_cast<float>(fh));
-            layer.transform.scaleY *= std::max(1.0f, static_cast<float>(fh) / static_cast<float>(fw));
-            layer.crop = req.crop;
-            layer.mask = req.mask;
-            layer.color = req.color;
-            layer.effects = req.effects;
-            layer.fitToFrame = true;
-            m_layers.push_back(std::move(layer));
-            continue;
-        }
-        if (req.path.empty() && req.adjustment) {
-            render::Layer layer;
-            layer.adjustment = true;
-            layer.transform = req.transform;
-            layer.crop = req.crop;
-            layer.mask = req.mask;
-            layer.color = req.color;
-            layer.effects = req.effects;
-            m_layers.push_back(std::move(layer));
-            continue;
-        }
         if (req.path.empty()) {
-            // Generated layer: text rendered at frame size, cached by content.
-            if (!req.text) continue;
-            auto tex = textTextureFor(*req.text, fw, fh);
-            if (!tex) continue;
             render::Layer layer;
-            layer.texture = std::move(tex);
-            layer.transform = req.transform;
-            layer.crop = req.crop;
-            layer.mask = req.mask;
-            layer.color = req.color;
-            layer.effects = req.effects;
-            layer.fitToFrame = true;
-            m_layers.push_back(std::move(layer));
+            if (m_layerFactory->generated(req, fw, fh, layer)) m_layers.push_back(std::move(layer));
             continue;
         }
         VideoReader& reader = readerFor(req);
@@ -478,15 +386,7 @@ void PlaybackEngine::renderOnce(TimePoint t, bool vsync) {
         if (!exact) starved = true;
         if (!tex) continue;
         if (!req.isImage) decoderName = reader.isHardware() ? "D3D11VA" : "Software";
-        render::Layer layer;
-        layer.texture = std::move(tex);
-        layer.transform = req.transform;
-        layer.crop = req.crop;
-        layer.mask = req.mask;
-        layer.color = req.color;
-        layer.effects = req.effects;
-        layer.fitToFrame = req.fitToFrame;
-        m_layers.push_back(std::move(layer));
+        m_layers.push_back(LayerFactory::media(req, std::move(tex)));
     }
     // Look-ahead hint: readers decode towards where playback is going.
     if (m_playing.load()) {
@@ -673,9 +573,7 @@ void PlaybackEngine::threadMain() {
     }
     // Release GPU objects on the thread that used them.
     m_readers.clear();
-    m_textCache.clear();
-    m_solidCache.clear();
-    m_text.reset();
+    if (m_layerFactory) m_layerFactory->clear();
     m_target.reset();
     m_surface.reset();
 }

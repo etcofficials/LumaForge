@@ -27,6 +27,9 @@
 #include "ui/panels/TitlesBrowserPanel.h"
 #include "ui/panels/TransitionsBrowserPanel.h"
 #include "ui/panels/MarkersPanel.h"
+#include "ui/export/ExportController.h"
+#include "ui/export/ExportQueuePanel.h"
+#include "ui/export/ExportSettingsPanel.h"
 #include "ui/playback/PlaybackController.h"
 #include "ui/preview/PreviewPanel.h"
 #include "ui/preview/PreviewWidget.h"
@@ -170,7 +173,7 @@ void MainWindow::buildMenus() {
     file->addSeparator();
     add(file, {ActionId::MediaImport, ActionId::MediaImportFolder});
     file->addSeparator();
-    add(file, {ActionId::Export});
+    add(file, {ActionId::Export, ActionId::ExportFrame});
     file->addSeparator();
     add(file, {ActionId::ProjectClose, ActionId::AppQuit});
 
@@ -397,6 +400,9 @@ void MainWindow::buildPanels() {
     m_titlesBrowser = new TitlesBrowserPanel(this);
     m_transitionsBrowser = new TransitionsBrowserPanel(this);
     m_markersPanel = new MarkersPanel(*m_document, *m_actions, this);
+    m_exportController = new ExportController(m_gpu, this);
+    m_exportSettings = new ExportSettingsPanel(*m_document, *m_exportController, this);
+    m_exportQueue = new ExportQueuePanel(*m_exportController, this);
 
     m_browser = new BrowserPanel(this);
     m_browser->addPage(m_mediaPanel, tr("Media"), QStringLiteral("media"), tr("Imported media and bins"));
@@ -415,6 +421,11 @@ void MainWindow::buildPanels() {
     m_workspaces->registerDock(DockId::Browser, browserDock);
     m_workspaces->registerDock(DockId::Inspector, inspectorDock);
     m_workspaces->registerDock(DockId::Timeline, timelineDock);
+    auto* exportSettingsDock = makeDock(tr("Export Settings"), QStringLiteral("exportSettingsDock"), m_exportSettings, nullptr);
+    auto* exportQueueDock = makeDock(tr("Render Queue"), QStringLiteral("exportQueueDock"), m_exportQueue, nullptr);
+    m_workspaces->registerDock(DockId::ExportSettings, exportSettingsDock);
+    m_workspaces->registerDock(DockId::ExportQueue, exportQueueDock);
+    m_workspaces->setAvailable(Workspace::Export, true);
     m_workspaces->setAvailable(Workspace::Edit, true);
     m_workspaces->setAvailable(Workspace::Color, true);
     m_workspaces->setAvailable(Workspace::Audio, true);
@@ -437,6 +448,8 @@ void MainWindow::buildStatusBar() {
     m_statusDecoder = make(tr("Video decoder used for the current frame"));
     m_statusHardware = make(tr("Detecting hardware…"));
     m_statusHardware->setText(tr("Detecting hardware…"));
+    m_statusExport = make(tr("Export progress (open the Export workspace for the queue)"));
+    m_statusExport->hide();
     m_statusMemory = make(tr("Memory used by LumaForge (working set)"));
     m_memoryTimer = new QTimer(this);
     m_memoryTimer->setInterval(2000);
@@ -593,6 +606,44 @@ void MainWindow::connectActions() {
     m_actions->connect(ActionId::GoToEnd, this, [this] {
         if (m_playback->mode() == PlaybackController::Mode::Source) m_playback->goToEnd();
         else seekTimeline(TimePoint{m_document->project().sequence.duration().ticks});
+    });
+    m_actions->connect(ActionId::Export, this, [this] { m_workspaces->switchTo(Workspace::Export); });
+    m_actions->connect(ActionId::ExportFrame, this, [this] {
+        const TimePoint t = m_timelinePanel->view()->playhead();
+        QDir().mkpath(AppPaths::path(AppPaths::Kind::Exports));
+        QString base = QString::fromStdString(m_document->project().settings.name);
+        if (base.isEmpty()) base = tr("Frame");
+        const QString suggested = QDir(AppPaths::path(AppPaths::Kind::Exports))
+                                      .filePath(QStringLiteral("%1 %2.png").arg(base, formatTimecode(t, m_document->project().settings.frameRate).replace(QLatin1Char(':'), QLatin1Char('-'))));
+        QString file = QFileDialog::getSaveFileName(this, tr("Export Frame"), QDir::toNativeSeparators(suggested), tr("PNG image (*.png)"));
+        if (file.isEmpty()) return;
+        if (!file.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive)) file += QStringLiteral(".png");
+        m_exportController->saveFrame(m_document->project(), t, file);
+    });
+    connect(m_exportSettings, &ExportSettingsPanel::exportFrameRequested, m_actions->action(ActionId::ExportFrame), &QAction::trigger);
+    connect(m_exportController, &ExportController::frameSaved, this, [this](const QString& path, bool ok, const QString& error) {
+        if (ok) m_toasts->show(tr("Frame saved: %1").arg(QFileInfo(path).fileName()), ToastHost::Kind::Success);
+        else m_toasts->show(tr("Could not save the frame: %1").arg(error), ToastHost::Kind::Error, 6000);
+    });
+    connect(m_exportSettings, &ExportSettingsPanel::exportQueued, this, [this](int) {
+        m_toasts->show(m_exportController->isBusy() ? tr("Export started") : tr("Export queued"), ToastHost::Kind::Info);
+    });
+    connect(m_exportController, &ExportController::jobProgress, this, [this](int id) {
+        if (const ExportJob* j = m_exportController->job(id)) {
+            m_statusExport->setText(tr("Exporting %1%").arg(std::lround(j->progress.fraction() * 100)));
+            m_statusExport->show();
+        }
+    });
+    connect(m_exportController, &ExportController::jobFinished, this, [this](int id) {
+        if (!m_exportController->isBusy()) m_statusExport->hide();
+        const ExportJob* j = m_exportController->job(id);
+        if (!j) return;
+        if (j->state == ExportJob::State::Done) {
+            m_toasts->show(tr("Exported %1 (%2)").arg(j->name, QString::fromStdString(formatBytes(j->result.bytes))), ToastHost::Kind::Success, 6000);
+            if (!j->result.note.empty()) m_toasts->show(QString::fromStdString(j->result.note), ToastHost::Kind::Warning, 8000);
+        }
+        else if (j->state == ExportJob::State::Failed)
+            m_toasts->show(tr("Export failed: %1").arg(j->message), ToastHost::Kind::Error, 8000);
     });
     m_actions->connect(ActionId::MarkerNext, this, [this] {
         if (auto t = project::ops::nextMarker(m_document->project().sequence, m_timelinePanel->view()->playhead())) seekTimeline(*t);
@@ -772,6 +823,9 @@ void MainWindow::updateUndoActions() {
 }
 
 void MainWindow::onDocumentChange(const project::Change& change) {
+    const bool hasClips = !m_document->project().sequence.clips.empty();
+    m_actions->setEnabled(ActionId::Export, hasClips);
+    m_actions->setEnabled(ActionId::ExportFrame, hasClips);
     switch (change.kind) {
         case project::Change::Kind::Reset:
         case project::Change::Kind::Settings:
@@ -896,6 +950,7 @@ void MainWindow::setHardwareReport(hw::HwReport report) {
     if (const auto* hwEnc = r.firstAvailableEncoder(hw::EncoderKind::Hardware)) parts << QString::fromStdString(hwEnc->name);
     else parts << tr("CPU encode");
     m_statusHardware->setText(parts.join(QStringLiteral(" · ")));
+    m_exportSettings->setEncoderProbes(r.encoders);
     m_toolbarHw->setText(parts.join(QStringLiteral(" · ")));
     QString tip;
     if (const auto* a = r.activeAdapter()) tip = QString::fromStdString(a->name) + QLatin1Char('\n');
@@ -1064,6 +1119,12 @@ void MainWindow::dropEvent(QDropEvent* event) {
 
 void MainWindow::closeEvent(QCloseEvent* event) {
     m_playback->pause();
+    if (m_exportController && m_exportController->isBusy()) {
+        const auto answer = QMessageBox::question(this, tr("Export in Progress"), tr("A video is still being exported. Stop the export and quit?"),
+                                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) { event->ignore(); return; }
+        for (const auto& j : m_exportController->jobs()) m_exportController->cancel(j.id);
+    }
     if (!m_project->maybeSave(this)) {
         event->ignore();
         return;

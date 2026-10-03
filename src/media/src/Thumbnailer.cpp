@@ -102,6 +102,20 @@ Result<Image> Thumbnailer::render(const std::string& utf8Path, const Options& op
     ff::SwsContextPtr sws(sws_getContext(srcW, srcH, static_cast<AVPixelFormat>(frame->format), dstW, dstH, AV_PIX_FMT_BGRA,
                                          SWS_AREA, nullptr, nullptr, nullptr));
     if (!sws) return Error{"The frame format is not supported for thumbnails.", std::string("sws_getContext failed for pix_fmt ") + std::to_string(frame->format)};
+    // Same matrix rule as the preview (VideoFrame::colorMatrix): the stream's
+    // tag, else SD = BT.601 / HD = BT.709. swscale alone would assume 601.
+    int matrix = SWS_CS_ITU709;
+    switch (frame->colorspace) {
+        case AVCOL_SPC_BT470BG:
+        case AVCOL_SPC_SMPTE170M:
+        case AVCOL_SPC_SMPTE240M: matrix = SWS_CS_ITU601; break;
+        case AVCOL_SPC_BT2020_NCL:
+        case AVCOL_SPC_BT2020_CL: matrix = SWS_CS_BT2020; break;
+        case AVCOL_SPC_UNSPECIFIED: matrix = srcH <= 576 ? SWS_CS_ITU601 : SWS_CS_ITU709; break;
+        default: break;
+    }
+    const bool fullRange = frame->color_range == AVCOL_RANGE_JPEG || frame->format == AV_PIX_FMT_YUVJ420P;
+    sws_setColorspaceDetails(sws.get(), sws_getCoefficients(matrix), fullRange ? 1 : 0, sws_getCoefficients(SWS_CS_DEFAULT), 1, 0, 1 << 16, 1 << 16);
 
     Image img;
     img.width = dstW;

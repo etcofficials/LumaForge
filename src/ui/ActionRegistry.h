@@ -34,7 +34,7 @@ enum class ActionId {
     ClipMoveToPlayhead, ClipEnable, ClipLift, ClipExtract,
     // Timeline
     TimelineZoomIn, TimelineZoomOut, TimelineZoomFit, TimelineSnap, TimelineAddText, TimelineExpand,
-    TimelineAddSolid, TimelineAddAdjustment, MarkerAdd, MarkerNext, MarkerPrevious,
+    TimelineAddSolid, TimelineAddAdjustment, MarkerAdd, MarkerNext, MarkerPrevious, ExportFrame,
     TimelineAddVideoTrack, TimelineAddAudioTrack,
     TrackAddAbove, TrackAddBelow, TrackDuplicate, TrackDelete, TrackRename, TrackMoveUp, TrackMoveDown, TrackLock, TrackMute, TrackSolo,
     ClipSpeed, ClipProperties, ClipRevealInMedia, ClipAddTransition,

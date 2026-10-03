@@ -31,6 +31,9 @@ qt_add_library(lf_ui STATIC
     panels/TitlesBrowserPanel.h panels/TitlesBrowserPanel.cpp
     panels/TransitionsBrowserPanel.h panels/TransitionsBrowserPanel.cpp
     panels/MarkersPanel.h panels/MarkersPanel.cpp
+    export/ExportController.h export/ExportController.cpp
+    export/ExportSettingsPanel.h export/ExportSettingsPanel.cpp
+    export/ExportQueuePanel.h export/ExportQueuePanel.cpp
     DragMime.h
     panels/InspectorPanel.h panels/InspectorPanel.cpp
     preview/PreviewWidget.h preview/PreviewWidget.cpp
@@ -55,7 +58,7 @@ target_include_directories(lf_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(lf_ui
     PUBLIC Qt6::Widgets Qt6::Svg
            lumaforge::core lumaforge::commands lumaforge::hardware lumaforge::rendering lumaforge::diagnostics
-           lumaforge::media lumaforge::project lumaforge::playback)
+           lumaforge::media lumaforge::project lumaforge::playback lumaforge::export)
 
 # Theme + icons are compiled into the binary; no loose files to lose at runtime.
 qt_add_resources(lf_ui "lf_ui_resources"

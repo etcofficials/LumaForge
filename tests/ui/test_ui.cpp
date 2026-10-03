@@ -10,6 +10,8 @@
 #include "ui/ActionRegistry.h"
 #include "ui/MainWindow.h"
 #include "ui/dialogs/CommandPalette.h"
+#include "ui/export/ExportController.h"
+#include "ui/export/ExportSettingsPanel.h"
 #include "ui/inspector/KeyframeControls.h"
 #include "ui/widgets/ParamSlider.h"
 #include "ui/panels/MediaPanel.h"
@@ -24,6 +26,8 @@
 #include <QTreeWidget>
 #include <QApplication>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QFileInfo>
 #include <QLabel>
 #include <QLineEdit>
 #include <QTabBar>
@@ -515,6 +519,48 @@ TEST_CASE("markers (M, Shift+M, Ctrl+Shift+M, panel) and solid / adjustment clip
     int solids = 0;
     for (const auto& c : seq.clips) solids += c.kind == project::ClipKind::Solid;
     CHECK(solids == 1);
+}
+
+TEST_CASE("export: Ctrl+M opens the Export workspace; the panel queues a render that completes") {
+    newProject();
+    focusTimeline();
+    auto* exportAct = act("export");
+    CHECK(!exportAct->isEnabled());                        // nothing to export yet
+    press(Qt::Key_T, Qt::ControlModifier);                 // a 5 s title
+    CHECK(exportAct->isEnabled());
+    press(Qt::Key_M, Qt::ControlModifier);
+    auto* panel = g_window->findChild<ExportSettingsPanel*>();
+    auto* controller = g_window->findChild<ExportController*>();
+    CHECK(panel && controller && panel->isVisible());
+    if (!panel || !controller) return;
+    // Small and fast for the test: 360p, ultrafast, 1 s range via In/Out.
+    auto* size = g_window->findChild<QComboBox*>(QStringLiteral("exportSize"));
+    CHECK(size != nullptr);
+    if (size) for (int i = 0; i < size->count(); ++i) if (size->itemData(i).toSize().height() == 360) size->setCurrentIndex(i);
+    timeline()->setMarkIn(TimePoint::zero());
+    timeline()->setMarkOut(TimePoint::fromSeconds(1));
+    pump();
+    auto* range = g_window->findChild<QComboBox*>(QStringLiteral("exportRange"));
+    if (range) range->setCurrentIndex(1);
+    auto* path = g_window->findChild<QLineEdit*>(QStringLiteral("exportPath"));
+    CHECK(path != nullptr);
+    if (!path) return;
+    const QString out = QStringLiteral("G:/Caches/tmp/lf_ui_tests/export test.mp4");
+    QFile::remove(out);
+    path->setText(QDir::toNativeSeparators(out));
+    const auto s = panel->settings();
+    CHECK(s.height == 360 && s.rangeEnd == TimePoint::fromSeconds(1));
+    const int id = panel->startExport();
+    CHECK(id > 0);
+    QElapsedTimer timer;
+    timer.start();
+    while (controller->isBusy() && timer.elapsed() < 120000) { QCoreApplication::processEvents(QEventLoop::AllEvents, 50); }
+    pump();
+    const ExportJob* job = controller->job(id);
+    CHECK(job && job->state == ExportJob::State::Done);
+    if (job && job->state != ExportJob::State::Done) std::printf("    export message: %s\n", qPrintable(job->message));
+    CHECK(QFileInfo(out).size() > 1000);
+    CHECK(job && job->result.frames == 30 && job->result.height == 360);
 }
 
 int main(int argc, char** argv) {

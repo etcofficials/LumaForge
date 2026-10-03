@@ -67,7 +67,8 @@ const ActionDef kActions[] = {
     {ActionId::AppQuit,         "appQuit",         "E&xit",                nullptr,   C::File, Shortcut{CTRL | Qt::Key_Q}, {}, "Quit LumaForge"},
     {ActionId::MediaImport,     "mediaImport",     "&Import Media…",       "import",  C::File, Shortcut{CTRL | Qt::Key_I}, {}, "Import video, audio or image files"},
     {ActionId::MediaImportFolder, "mediaImportFolder", "Import &Folder…",  nullptr,   C::File, Shortcut{CTRL | SHIFT | Qt::Key_I}, {}, "Import every media file in a folder and its subfolders"},
-    {ActionId::Export,          "export",          "&Export…",             "export",  C::File, Shortcut{CTRL | Qt::Key_M}, {}, "Render the timeline to a video file", false, false},
+    {ActionId::Export,          "export",          "&Export…",             "export",  C::File, Shortcut{CTRL | Qt::Key_M}, {}, "Render the timeline to a video file (opens the Export workspace)", false, false},
+    {ActionId::ExportFrame,     "exportFrame",     "Export &Frame…",       "snapshot", C::File, Shortcut{CTRL | SHIFT | Qt::Key_E}, {}, "Save the frame at the playhead as a PNG image", false, false},
 
     // ---- Edit
     {ActionId::EditUndo,        "editUndo",        "&Undo",                "undo",    C::Edit, Shortcut{CTRL | Qt::Key_Z}, {}, "Undo the last edit", false, false},
