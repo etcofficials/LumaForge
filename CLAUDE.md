@@ -37,8 +37,7 @@ CPU i5-2400S: 4C/4T, AVX but no AVX2.
 ## Where things are
 - Architecture: `docs/ARCHITECTURE.md`; decisions: `docs/DECISIONS.md`; toolchain: `TOOLS.md`.
 - Milestone order: media engine -> playback -> timeline model -> project -> editing core (V0.3, done) -> export (V0.4) -> cache/proxies.
-- Packaging: `tools/package-release.ps1` (portable ZIP) then `tools/package-installer.ps1` (NSIS Setup.exe, NSIS at G:DevTools
-sis).
+- Packaging: `tools/package-release.ps1` (portable ZIP) then `tools/package-installer.ps1` (NSIS Setup.exe, NSIS at G:\DevTools\nsis).
 - Export: `src/export` (namespace `lf::exporting`; `export` is a keyword). Preview and export share
   `SequenceProgram` -> `playback::LayerFactory` -> `render::Compositor`; never add a render feature to one path only.
 - Timeline edits: add a pure function in `project/TimelineOps` returning a `SequenceEdit`, test it in
