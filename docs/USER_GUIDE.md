@@ -133,8 +133,19 @@ histogram. Colour correction is in the Inspector's Color tab
 
 **Export (Ctrl+M)** opens the EXPORT workspace. Pick a preset (YouTube
 1080p/720p, high quality, small web, fast draft, HEVC, MKV archive) or set
-format (MP4/MOV/MKV), codec (H.264, HEVC), encoder, resolution, quality or
-bitrate, speed, audio and range (whole timeline or In–Out). The summary shows
+format (MP4/MOV/MKV), codec (H.264, HEVC), encoder, resolution (standard
+sizes up to 4K, or Custom), frame rate, quality or bitrate, speed, audio
+(bitrate, 48/44.1 kHz, stereo/mono) and range (whole timeline or In–Out).
+The line under Encoder says whether a working hardware encoder was found or
+the CPU encoder is used. **Advanced** holds fast start, the pixel format and
+the title/comment written into the file. Your choices are remembered.
+
+**Lossless fast cut**: when the range is one unedited piece of a single file
+(no effects, colour, text, transitions, speed or audio changes), tick it to
+copy the original streams without re-encoding — no quality loss and done in
+seconds. The panel shows **LOSSLESS** or **RE-ENCODE** and, if a lossless
+cut is not possible, why. The cut starts on the keyframe at or before the
+range start. The summary shows
 the size, length, estimated file size and free disk space; problems such as
 missing media block the export with an explanation. Press **Export**: jobs run
 one after another in the **Render Queue** with progress, speed and time left;

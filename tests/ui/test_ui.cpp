@@ -7,6 +7,8 @@
 
 #include "lumaforge/project/Document.h"
 #include "lumaforge/project/MediaCommands.h"
+#include "lumaforge/project/TimelineCommands.h"
+#include "lumaforge/project/TimelineOps.h"
 #include "ui/ActionRegistry.h"
 #include "ui/MainWindow.h"
 #include "ui/dialogs/CommandPalette.h"
@@ -26,7 +28,9 @@
 #include "ui/timeline/TimelineView.h"
 
 #include <QAction>
+#include <QCheckBox>
 #include <QComboBox>
+#include <QToolButton>
 #include <QDoubleSpinBox>
 #include <QDialogButtonBox>
 #include <QSpinBox>
@@ -575,6 +579,104 @@ TEST_CASE("export: Ctrl+M opens the Export workspace; the panel queues a render 
     if (job && job->state != ExportJob::State::Done) std::printf("    export message: %s\n", qPrintable(job->message));
     CHECK(QFileInfo(out).size() > 1000);
     CHECK(job && job->result.frames == 30 && job->result.height == 360);
+}
+
+TEST_CASE("export panel: frame rate, custom size, audio format, metadata, lossless mode, encoder status; choices persist") {
+    newProject();
+    auto& doc = g_window->document();
+    project::MediaItem m;
+    m.id = doc.allocateMediaId();
+    m.path = std::string(LF_TEST_MEDIA_DIR_UI) + "/countdown_720p30.mp4";
+    m.displayName = "countdown";
+    auto info = media::MediaProbe::probe(m.path);
+    CHECK(static_cast<bool>(info));
+    if (!info) return;
+    m.info = *info;
+    doc.push(std::make_unique<project::ImportMediaCommand>(doc, std::vector<project::MediaItem>{m}));
+    auto clips = project::ops::clipsForMedia(doc, m, project::ops::defaultPlacement(doc.project(), m, TimePoint::zero()));
+    doc.push(std::make_unique<project::SequenceEditCommand>(doc, "Add", project::ops::insertClips(doc, std::move(clips))));
+    act("export")->trigger();
+    pump();
+    auto* panel = g_window->findChild<ExportSettingsPanel*>();
+    auto* controller = g_window->findChild<ExportController*>();
+    auto* fps = g_window->findChild<QComboBox*>(QStringLiteral("exportFps"));
+    auto* size = g_window->findChild<QComboBox*>(QStringLiteral("exportSize"));
+    auto* customW = g_window->findChild<QSpinBox*>(QStringLiteral("exportCustomWidth"));
+    auto* customH = g_window->findChild<QSpinBox*>(QStringLiteral("exportCustomHeight"));
+    auto* channels = g_window->findChild<QComboBox*>(QStringLiteral("exportChannels"));
+    auto* sampleRate = g_window->findChild<QComboBox*>(QStringLiteral("exportSampleRate"));
+    auto* lossless = g_window->findChild<QCheckBox*>(QStringLiteral("exportLossless"));
+    auto* mode = g_window->findChild<QLabel*>(QStringLiteral("exportMode"));
+    auto* encoderStatus = g_window->findChild<QLabel*>(QStringLiteral("exportEncoderStatus"));
+    auto* advancedToggle = g_window->findChild<QToolButton*>(QStringLiteral("exportAdvancedToggle"));
+    auto* advanced = g_window->findChild<QWidget*>(QStringLiteral("exportAdvanced"));
+    auto* title = g_window->findChild<QLineEdit*>(QStringLiteral("exportTitle"));
+    auto* start = g_window->findChild<QPushButton*>(QStringLiteral("exportStart"));
+    CHECK(panel && controller && fps && size && customW && customH && channels && sampleRate && lossless && mode && encoderStatus && advancedToggle && advanced && title && start);
+    if (!panel || !controller || !fps || !size || !customW || !customH || !channels || !sampleRate || !lossless || !mode || !encoderStatus || !advancedToggle || !advanced || !title || !start) return;
+
+    // Frame rate: "Project" by default, then any standard rate.
+    CHECK(fps->currentIndex() == 0 && panel->settings().frameRate.num == 0);
+    fps->setCurrentIndex(fps->findData(QSize(25, 1)));
+    CHECK(panel->settings().frameRate == (Rational{25, 1}));
+    // Upscaled and custom sizes (the custom fields only show for Custom).
+    CHECK(size->findData(QSize(3840, 2160)) >= 0);
+    CHECK(!customW->isVisibleTo(panel));
+    size->setCurrentIndex(size->findData(QSize(-1, -1)));
+    pump();
+    CHECK(customW->isVisibleTo(panel));
+    customW->setValue(801);
+    customH->setValue(600);
+    CHECK(panel->settings().width == 800 && panel->settings().height == 600);   // rounded to even
+    // Audio format and metadata.
+    channels->setCurrentIndex(channels->findData(1));
+    sampleRate->setCurrentIndex(sampleRate->findData(44100));
+    CHECK(panel->settings().audioChannels == 1 && panel->settings().audioSampleRate == 44100);
+    CHECK(!advanced->isVisibleTo(panel));                                            // collapsed by default
+    advancedToggle->click();
+    CHECK(advanced->isVisibleTo(panel));
+    title->setText(QStringLiteral("My film"));
+    CHECK(panel->settings().title == "My film");
+    // The encoder status is measured, never blank.
+    CHECK(!encoderStatus->text().isEmpty());
+
+    // Lossless: possible for the untouched clip; re-encode controls are disabled meanwhile.
+    CHECK(mode->text().contains(QStringLiteral("RE-ENCODE")));
+    lossless->setChecked(true);
+    CHECK(mode->text().contains(QStringLiteral("LOSSLESS")) && start->isEnabled() && !fps->isEnabled() && !size->isEnabled());
+    CHECK(panel->settings().losslessFastCut);
+    // ...and refused, with the reason, once the clip is colour corrected.
+    {
+        auto& seq = doc.project().sequence;
+        project::SequenceEdit e;
+        for (const auto& c : seq.clips)
+            if (c.kind == project::ClipKind::Video) {
+                project::Clip changed = c;
+                changed.color.saturation = 0.5f;
+                e.modified.push_back(changed);
+            }
+        doc.push(std::make_unique<project::SequenceEditCommand>(doc, "Colour", std::move(e)));
+        pump();
+    }
+    CHECK(mode->text().contains(QStringLiteral("RE-ENCODE needed")) && mode->text().contains(QStringLiteral("colour")));
+    CHECK(!start->isEnabled() && panel->startExport() == 0);
+    lossless->setChecked(false);
+    CHECK(start->isEnabled());
+
+    // A new panel (next session) comes back with the same choices.
+    ExportSettingsPanel again(doc, *controller);
+    const auto s = again.settings();
+    CHECK(s.frameRate == (Rational{25, 1}) && s.width == 800 && s.height == 600 && s.audioChannels == 1 && s.audioSampleRate == 44100);
+    CHECK(!s.losslessFastCut);
+    CHECK(QSettings().value(QStringLiteral("export/advancedOpen")).toBool());
+    // Back to defaults for the tests that follow.
+    fps->setCurrentIndex(0);
+    size->setCurrentIndex(0);
+    channels->setCurrentIndex(0);
+    sampleRate->setCurrentIndex(0);
+    title->clear();
+    advancedToggle->click();
+    doc.undoStack().undo();
 }
 
 TEST_CASE("scopes: waveform, parade and vectorscope place known colours where they belong") {
