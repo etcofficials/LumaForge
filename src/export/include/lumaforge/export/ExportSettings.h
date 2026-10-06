@@ -34,7 +34,17 @@ struct ExportSettings {
     bool fastStart = true;               // MP4/MOV: index at the front, plays while downloading
     bool burnSubtitles = true;           // render subtitle tracks into the picture
     bool subtitleSidecar = false;        // also write <name>.srt next to the video
+    Rational frameRate{0, 1};            // output frame rate; 0 = the project's
+    int audioChannels = 2;               // 1 = mono, 2 = stereo
+    std::string title;                   // file metadata (empty = project name)
+    std::string comment;
+    bool losslessFastCut = false;        // stream copy without re-encoding (see FastCut.h)
 };
+
+// The frame rate actually written: settings' rate, or the project's.
+[[nodiscard]] Rational outputFrameRate(const ExportSettings& s, const project::Project& project) noexcept;
+// Common frame rates offered for export.
+[[nodiscard]] std::span<const Rational> standardFrameRates() noexcept;
 
 struct ExportPreset {
     const char* id;

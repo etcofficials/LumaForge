@@ -21,6 +21,8 @@ public:
         Rational frameRate;
         bool audio = false;
         int audioChannels = 2;
+        std::string title;
+        std::string comment;
     };
 
     static Result<std::unique_ptr<Muxer>> open(const Spec& spec);

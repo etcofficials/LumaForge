@@ -220,7 +220,9 @@ Result<std::unique_ptr<Muxer>> Muxer::open(const Spec& spec) {
     }
     AVDictionary* opts = nullptr;
     if (s.fastStart && (s.container == Container::Mp4 || s.container == Container::Mov)) av_dict_set(&opts, "movflags", "+faststart", 0);
-    av_dict_set(&d.oc->metadata, "encoder", "LumaForge", 0);
+    if (!spec.title.empty()) av_dict_set(&d.oc->metadata, "title", spec.title.c_str(), 0);
+    if (!spec.comment.empty()) av_dict_set(&d.oc->metadata, "comment", spec.comment.c_str(), 0);
+    av_dict_set(&d.oc->metadata, "creation_time", "now", 0);
     r = avformat_write_header(d.oc, &opts);
     av_dict_free(&opts);
     if (r < 0) return fail("Could not write the file header.", "avformat_write_header", r);

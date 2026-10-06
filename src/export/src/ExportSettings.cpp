@@ -80,9 +80,19 @@ TimeRange exportRange(const ExportSettings& s, const project::Project& project) 
     return TimeRange{TimePoint{a}, Duration{b - a}};
 }
 
+Rational outputFrameRate(const ExportSettings& s, const project::Project& project) noexcept {
+    return s.frameRate.isValid() && !s.frameRate.isZero() ? s.frameRate : project.settings.frameRate;
+}
+
+std::span<const Rational> standardFrameRates() noexcept {
+    static const Rational rates[] = {Rational{24000, 1001}, Rational{24, 1}, Rational{25, 1}, Rational{30000, 1001}, Rational{30, 1},
+                                     Rational{50, 1}, Rational{60000, 1001}, Rational{60, 1}};
+    return rates;
+}
+
 std::int64_t frameCount(const ExportSettings& s, const project::Project& project) {
     const TimeRange r = exportRange(s, project);
-    const Ticks fd = frameDuration(project.settings.frameRate).ticks;
+    const Ticks fd = frameDuration(outputFrameRate(s, project)).ticks;
     return fd > 0 ? (r.duration.ticks + fd - 1) / fd : 0;
 }
 
@@ -93,7 +103,7 @@ std::uint64_t estimatedBytes(const ExportSettings& s, const project::Project& pr
     double videoKbps = s.videoKbps;
     if (s.rateControl == RateControl::Quality) {
         // Empirical: ~0.1 bit per pixel per frame at CRF 20 for typical footage, x2 per -6 CRF.
-        const double fps = project.settings.frameRate.toDouble();
+        const double fps = outputFrameRate(s, project).toDouble();
         const double bpp = 0.1 * std::pow(2.0, (20.0 - s.crf) / 6.0) * (s.codec == VideoCodec::Hevc ? 0.6 : 1.0);
         videoKbps = w * h * fps * bpp / 1000.0;
     }
@@ -122,6 +132,9 @@ std::vector<std::string> validate(const ExportSettings& s, const project::Projec
     if (w > 8192 || h > 8192) problems.push_back("The output size is larger than 8192 pixels.");
     if (s.rateControl == RateControl::Bitrate && (s.videoKbps < 100 || s.videoKbps > 200000)) problems.push_back("The video bitrate must be between 100 and 200000 kbit/s.");
     if (s.crf < 0 || s.crf > 51) problems.push_back("Quality must be between 0 and 51.");
+    const Rational fps = outputFrameRate(s, project);
+    if (!fps.isValid() || fps.toDouble() < 1.0 || fps.toDouble() > 240.0) problems.push_back("The frame rate must be between 1 and 240 fps.");
+    if (s.audioChannels != 1 && s.audioChannels != 2) problems.push_back("Audio must be mono or stereo.");
     return problems;
 }
 

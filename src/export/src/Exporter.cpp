@@ -1,6 +1,7 @@
 #include "lumaforge/export/Exporter.h"
 
 #include "Muxer.h"
+#include "lumaforge/export/FastCut.h"
 #include "lumaforge/core/Log.h"
 #include "lumaforge/hardware/GpuDevice.h"
 #include "lumaforge/media/MediaProbe.h"
@@ -176,11 +177,45 @@ Result<ExportResult> Exporter::run(const project::Project& original, const Expor
     using Clock = std::chrono::steady_clock;
     const auto started = Clock::now();
     if (const auto problems = validate(settings, snapshot); !problems.empty()) return Error{problems.front()};
+    // Missing media is never silently rendered as black: files may have gone away since the project was opened.
+    for (auto& m : snapshot.media) {
+        std::error_code ec;
+        if (!m.offline && !std::filesystem::exists(toPath(m.path), ec)) m.offline = true;
+    }
+    if (const auto missing = offlineMediaInRange(settings, snapshot); !missing.empty())
+        return Error{"Media is missing: " + missing.front() + (missing.size() > 1 ? " (and " + std::to_string(missing.size() - 1) + " more)" : std::string{}) + ". Relink it before exporting."};
+    if (settings.losslessFastCut) {
+        // Stream copy: no decoding, compositing or encoding at all.
+        const FastCutCheck check = checkFastCut(snapshot, settings);
+        ExportProgress p;
+        p.totalFrames = frameCount(settings, snapshot);
+        auto done = fastCut(check, settings, [&](double f) {
+            p.frame = static_cast<std::int64_t>(f * p.totalFrames);
+            p.elapsedSeconds = std::chrono::duration<double>(Clock::now() - started).count();
+            p.framesPerSecond = p.elapsedSeconds > 0 ? p.frame / p.elapsedSeconds : 0.0;
+            if (progress) progress(p);
+        }, cancel);
+        if (!done) return done.error();
+        auto probe = media::MediaProbe::probe(settings.outputPath);
+        if (!probe || !probe->hasVideo()) return Error{"The exported file could not be read back."};
+        ExportResult result;
+        result.path = settings.outputPath;
+        result.frames = p.totalFrames;
+        result.videoEncoder = "copy";
+        result.audioEncoder = probe->hasAudio() ? "copy" : "";
+        result.width = probe->video->width;
+        result.height = probe->video->height;
+        result.seconds = std::chrono::duration<double>(Clock::now() - started).count();
+        std::error_code ec;
+        result.bytes = static_cast<std::uint64_t>(std::filesystem::file_size(toPath(settings.outputPath), ec));
+        result.note = "Lossless copy of the source: no re-encoding (starts at the keyframe at or before the In point).";
+        return result;
+    }
     if (auto s = d.ensureDevice(); !s) return s.error();
 
     int w = 0, h = 0;
     outputSize(settings, snapshot, w, h);
-    const Rational fps = snapshot.settings.frameRate;
+    const Rational fps = outputFrameRate(settings, snapshot);   // the timeline is evaluated at each output frame time
     const TimeRange range = exportRange(settings, snapshot);
     const std::int64_t total = frameCount(settings, snapshot);
     auto program = std::make_shared<playback::SequenceProgram>(snapshot);
@@ -200,7 +235,9 @@ Result<ExportResult> Exporter::run(const project::Project& original, const Expor
     spec.height = h;
     spec.frameRate = fps;
     spec.audio = audio;
-    spec.audioChannels = 2;
+    spec.audioChannels = settings.audioChannels;
+    spec.title = settings.title.empty() ? snapshot.settings.name : settings.title;
+    spec.comment = settings.comment.empty() ? std::string("Made with LumaForge") : settings.comment;
     LF_LOG_INFO(kLog, "export start: {} | {}x{} @ {}/{} | {} frames ({:.2f} s from {:.2f} s) | audio {}", settings.outputPath, w, h, fps.num, fps.den, total,
                 range.duration.toSeconds(), range.start.toSeconds(), audio ? "yes" : "no");
     auto muxer = Muxer::open(spec);
@@ -229,7 +266,7 @@ Result<ExportResult> Exporter::run(const project::Project& original, const Expor
     auto target = d.compositor->createTarget(w, h);
     if (!target) return cleanup(target.error());
 
-    playback::AudioMixer mixer(settings.audioSampleRate, 2);
+    playback::AudioMixer mixer(settings.audioSampleRate, settings.audioChannels);
     if (audio) {
         mixer.setProgram(program);
         mixer.setTime(range.start);
@@ -256,7 +293,7 @@ Result<ExportResult> Exporter::run(const project::Project& original, const Expor
                                                              static_cast<std::int64_t>(range.duration.toSeconds() * sampleRate + 0.5));
             const int n = static_cast<int>(std::max<std::int64_t>(0, want - samplesWritten));
             if (n > 0) {
-                samples.assign(static_cast<std::size_t>(n) * 2, 0.0f);
+                samples.assign(static_cast<std::size_t>(n) * settings.audioChannels, 0.0f);
                 mixer.render(samples.data(), n);
                 if (auto s = (*muxer)->writeAudio(samples.data(), n); !s) return cleanup(s.error());
                 samplesWritten += n;
