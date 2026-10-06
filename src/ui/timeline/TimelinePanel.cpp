@@ -7,6 +7,7 @@
 #include "ui/media/WaveformService.h"
 #include "ui/widgets/PanelHeader.h"
 
+#include <QSettings>
 #include <QAction>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -72,8 +73,9 @@ TimelinePanel::TimelinePanel(project::Document& doc, ActionRegistry& actions, QW
     layout->addWidget(m_scroll);
 
     auto* snap = actions.action(ActionId::TimelineSnap);
-    snap->setChecked(true);
     connect(snap, &QAction::toggled, m_view, &TimelineView::setSnappingEnabled);
+    snap->setChecked(QSettings().value(QStringLiteral("timeline/snapping"), true).toBool());   // Settings > Editing
+    m_view->setSnappingEnabled(snap->isChecked());
     actions.connect(ActionId::TimelineZoomIn, this, [this] { m_view->zoomIn(); });
     actions.connect(ActionId::TimelineZoomOut, this, [this] { m_view->zoomOut(); });
     actions.connect(ActionId::TimelineZoomFit, this, [this] { m_view->zoomToFit(); });
@@ -92,7 +94,10 @@ TimelinePanel::TimelinePanel(project::Document& doc, ActionRegistry& actions, QW
     actions.connect(ActionId::ClipFrameHold, this, [this] { m_view->addFrameHold(); });
     actions.connect(ActionId::TimelineAddSolid, this, [this] { m_view->addGeneratedClip(project::ClipKind::Solid); });
     actions.connect(ActionId::TimelineAddAdjustment, this, [this] { m_view->addGeneratedClip(project::ClipKind::Adjustment); });
-    actions.connect(ActionId::ClipAddTransition, this, [this] { m_view->addTransition(project::TransitionType::CrossDissolve, project::kDefaultTransitionDuration); });
+    actions.connect(ActionId::ClipAddTransition, this, [this] {
+        const double seconds = QSettings().value(QStringLiteral("editing/transitionSeconds"), 1.0).toDouble();
+        m_view->addTransition(project::TransitionType::CrossDissolve, Duration::fromSeconds(seconds));
+    });
     actions.connect(ActionId::ClipNudgeLeft, this, [this] { m_view->nudgeSelection(-1); });
     actions.connect(ActionId::ClipNudgeRight, this, [this] { m_view->nudgeSelection(1); });
     actions.connect(ActionId::ClipNudgeLeftLarge, this, [this] { m_view->nudgeSelection(-10); });

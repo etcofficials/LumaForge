@@ -35,7 +35,7 @@ enum class ActionId {
     // Timeline
     TimelineZoomIn, TimelineZoomOut, TimelineZoomFit, TimelineSnap, TimelineAddText, TimelineExpand,
     TimelineAddSolid, TimelineAddAdjustment, MarkerAdd, MarkerNext, MarkerPrevious, ExportFrame,
-    SubtitleAdd, SubtitlesImport, SubtitlesExport, ClipFrameHold, AudioRecordVoiceOver, PlaybackUseProxies,
+    SubtitleAdd, SubtitlesImport, SubtitlesExport, ClipFrameHold, AudioRecordVoiceOver, PlaybackUseProxies, AppSettings,
     TimelineAddVideoTrack, TimelineAddAudioTrack,
     TrackAddAbove, TrackAddBelow, TrackDuplicate, TrackDelete, TrackRename, TrackMoveUp, TrackMoveDown, TrackLock, TrackMute, TrackSolo,
     ClipSpeed, ClipProperties, ClipRevealInMedia, ClipAddTransition,

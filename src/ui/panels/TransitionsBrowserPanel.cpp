@@ -9,6 +9,7 @@
 #include <QLineEdit>
 #include <QMimeData>
 #include <QPushButton>
+#include <QSettings>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -90,7 +91,7 @@ TransitionsBrowserPanel::TransitionsBrowserPanel(QWidget* parent) : QWidget(pare
     m_duration->setRange(0.1, 10.0);
     m_duration->setSingleStep(0.25);
     m_duration->setDecimals(2);
-    m_duration->setValue(1.0);
+    m_duration->setValue(QSettings().value(QStringLiteral("editing/transitionSeconds"), 1.0).toDouble());   // Settings > Editing
     m_duration->setSuffix(tr(" s"));
     form->addRow(tr("Duration"), m_duration);
     layout->addLayout(form);

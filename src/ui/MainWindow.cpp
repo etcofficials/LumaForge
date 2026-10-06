@@ -18,6 +18,7 @@
 #include "ui/dialogs/DiagnosticsDialog.h"
 #include "ui/dialogs/ShortcutEditor.h"
 #include "ui/dialogs/VoiceOverDialog.h"
+#include "ui/dialogs/SettingsDialog.h"
 #include "ui/dialogs/ProjectSettingsDialog.h"
 #include "ui/home/HomeScreen.h"
 #include "ui/media/ImportController.h"
@@ -92,7 +93,7 @@ void repolish(QWidget* w) {
 MainWindow::MainWindow(std::shared_ptr<hw::GpuDevice> gpu, std::shared_ptr<log::RingBufferSink> logSink, QWidget* parent)
     : QMainWindow(parent), m_gpu(std::move(gpu)), m_logSink(std::move(logSink)), m_actions(new ActionRegistry(this)),
       m_document(std::make_unique<project::Document>()), m_importer(new ImportController(*m_document, this)),
-      m_playback(new PlaybackController(m_gpu, true, this)), m_project(new ProjectController(*m_document, this)) {
+      m_playback(new PlaybackController(m_gpu, SettingsDialog::hardwareDecodeAllowed(), this)), m_project(new ProjectController(*m_document, this)) {
     setAcceptDrops(true);
     setWindowIcon(QIcon(QStringLiteral(":/icons/app.svg")));
     setMinimumSize(1024, 640);
@@ -193,6 +194,8 @@ void MainWindow::buildMenus() {
     m_recentMenu = file->addMenu(tr("Open &Recent"));
     file->addSeparator();
     add(file, {ActionId::ProjectSave, ActionId::ProjectSaveAs, ActionId::ProjectSettings});
+    file->addSeparator();
+    add(file, {ActionId::AppSettings});
     file->addSeparator();
     add(file, {ActionId::MediaImport, ActionId::MediaImportFolder});
     file->addSeparator();
@@ -524,6 +527,13 @@ void MainWindow::connectActions() {
     m_actions->connect(ActionId::ProjectSave, this, [this] { if (m_project->save(this)) m_toasts->show(tr("Project saved"), ToastHost::Kind::Success); });
     m_actions->connect(ActionId::ProjectSaveAs, this, [this] { if (m_project->saveAs(this)) m_toasts->show(tr("Project saved"), ToastHost::Kind::Success); });
     m_actions->connect(ActionId::ProjectSettings, this, [this] { showProjectSettings(); });
+    m_actions->connect(ActionId::AppSettings, this, [this] {
+        SettingsDialog dlg(*m_actions, *m_autosave, *m_proxies, this);
+        connect(&dlg, &SettingsDialog::restartNeeded, this, [this] {
+            m_toasts->show(tr("Some changes take effect when LumaForge is restarted."), ToastHost::Kind::Info, 6000);
+        });
+        dlg.exec();
+    });
     m_actions->connect(ActionId::ProjectClose, this, [this] { closeProject(); });
     m_actions->connect(ActionId::AppQuit, this, [this] { close(); });
     connect(m_project, &ProjectController::statusMessage, this, [this](const QString& m) { statusBar()->showMessage(m, 4000); });

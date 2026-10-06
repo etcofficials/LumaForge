@@ -17,6 +17,7 @@
 #include "ui/panels/MediaPanel.h"
 #include "ui/media/ProxyController.h"
 #include "ui/project/AutosaveManager.h"
+#include "ui/dialogs/SettingsDialog.h"
 #include "ui/home/HomeScreen.h"
 #include "ui/AppPaths.h"
 #include "lumaforge/project/ProjectSerializer.h"
@@ -27,6 +28,8 @@
 #include <QAction>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QDialogButtonBox>
+#include <QSpinBox>
 #include <QListView>
 #include <QListWidget>
 #include <QPushButton>
@@ -697,6 +700,41 @@ TEST_CASE("autosave writes unsaved work; a crashed session's autosave is offered
     const QDir backups(QDir(AppPaths::path(AppPaths::Kind::Backups)).filePath(QStringLiteral("Backup Test")));
     CHECK(backups.entryList({QStringLiteral("*.lfproj")}, QDir::Files).size() >= 1);
     doc.markSaved();
+}
+
+TEST_CASE("settings: Ctrl+, opens the dialog; autosave interval and transition length take effect") {
+    CHECK(hasShortcut("appSettings", QKeySequence(Qt::CTRL | Qt::Key_Comma)));
+    auto* autosave = g_window->findChild<AutosaveManager*>();
+    auto* proxies = g_window->findChild<ProxyController*>();
+    auto* registry = g_window->findChild<ActionRegistry*>();
+    CHECK(autosave && proxies && registry);
+    if (!autosave || !proxies || !registry) return;
+    {
+        SettingsDialog dlg(*registry, *autosave, *proxies, g_window);
+        auto* minutes = dlg.findChild<QSpinBox*>(QStringLiteral("settingsAutosave"));
+        const auto spins = dlg.findChildren<QDoubleSpinBox*>();
+        CHECK(minutes && !spins.isEmpty());
+        if (!minutes || spins.isEmpty()) return;
+        minutes->setValue(5);
+        for (auto* sp : spins) if (sp->suffix() == QStringLiteral(" s")) sp->setValue(2.0);
+        auto* box = dlg.findChild<QDialogButtonBox*>();
+        box->button(QDialogButtonBox::Apply)->click();
+    }
+    CHECK(autosave->intervalMinutes() == 5);
+    CHECK(std::abs(SettingsDialog::defaultTransitionSeconds() - 2.0) < 1e-9);
+    // A new transition uses the new default length.
+    newProject();
+    focusTimeline();
+    press(Qt::Key_T, Qt::ControlModifier);
+    press(Qt::Key_End);
+    press(Qt::Key_T, Qt::ControlModifier);
+    press(Qt::Key_D, Qt::ControlModifier | Qt::ShiftModifier);
+    const auto& seq = g_window->document().project().sequence;
+    bool found = false;
+    for (const auto& c : seq.clips) if (c.transitionIn) found = c.transitionIn->duration == Duration::fromSeconds(2);
+    CHECK(found);
+    autosave->setIntervalMinutes(2);
+    QSettings().setValue(QStringLiteral("editing/transitionSeconds"), 1.0);
 }
 
 int main(int argc, char** argv) {
