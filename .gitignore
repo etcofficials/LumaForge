@@ -27,3 +27,6 @@ CMakeLists.txt.user*
 # Logs and temp
 *.log
 *.tmp
+
+# Release packages
+/dist/
