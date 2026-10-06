@@ -1,5 +1,7 @@
 #include "ui/project/ProjectController.h"
 
+#include "ui/project/AutosaveManager.h"
+
 #include "lumaforge/core/Log.h"
 #include "lumaforge/project/ProjectSerializer.h"
 
@@ -95,6 +97,20 @@ bool ProjectController::openFile(const QString& pathIn, QWidget* parent) {
     return true;
 }
 
+bool ProjectController::openRecovered(const QString& autosavePath, const QString& originalPath, QWidget* parent) {
+    auto loaded = project::serializer::loadFromFile(toNative(autosavePath).toStdString());
+    if (!loaded) {
+        QMessageBox::warning(parent, tr("Recover Project"), tr("The autosave could not be read:\n\n%1").arg(QString::fromStdString(loaded.error().message)));
+        return false;
+    }
+    m_doc.setFilePath(originalPath.isEmpty() ? std::string() : toNative(originalPath).toStdString());
+    m_doc.reset(std::move(loaded->project));
+    m_doc.markModified();   // recovered work is not saved yet
+    emit projectLoaded(originalPath);
+    emit statusMessage(tr("Recovered unsaved work — save to keep it"));
+    return true;
+}
+
 // ---------------------------------------------------------------- save
 
 bool ProjectController::save(QWidget* parent) {
@@ -121,6 +137,9 @@ bool ProjectController::saveTo(const QString& pathIn, QWidget* parent) {
         m_doc.project().settings.name = QFileInfo(path).completeBaseName().toStdString();
         m_doc.notify(project::Change{project::Change::Kind::Settings, {}, {}});
     }
+    // Keep the previous version: the newest backups of every project live in the data folder.
+    if (QSettings().value(QStringLiteral("backups/enabled"), true).toBool())
+        AutosaveManager::backupBeforeSave(path, QString::fromStdString(m_doc.project().settings.name), QSettings().value(QStringLiteral("backups/keep"), 10).toInt());
     auto saved = project::serializer::saveToFile(m_doc.project(), path.toStdString());
     if (!saved) {
         LF_LOG_ERROR(kLog, "save failed: {}", saved.error().fullText());

@@ -27,6 +27,8 @@ public slots:
     bool newProject(QWidget* parent);
     bool open(QWidget* parent);
     bool openFile(const QString& path, QWidget* parent);
+    // Opens an autosave as unsaved work that belongs to `originalPath` (may be empty).
+    bool openRecovered(const QString& autosavePath, const QString& originalPath, QWidget* parent);
     bool save(QWidget* parent);
     bool saveAs(QWidget* parent);
     // Returns false when the user cancelled (caller must abort what it was doing).

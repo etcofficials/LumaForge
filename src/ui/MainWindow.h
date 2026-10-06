@@ -37,6 +37,7 @@ class MediaPanel;
 class PlaybackController;
 class PreviewPanel;
 class ProjectController;
+class AutosaveManager;
 class ProjectInfoPanel;
 class TimelinePanel;
 class TitlesBrowserPanel;
@@ -155,6 +156,7 @@ private:
     MarkersPanel* m_markersPanel = nullptr;
     MixerPanel* m_mixerPanel = nullptr;
     ProxyController* m_proxies = nullptr;
+    AutosaveManager* m_autosave = nullptr;
     ScopesPanel* m_scopesPanel = nullptr;
     PerformancePanel* m_performancePanel = nullptr;
     QDockWidget* m_performanceDock = nullptr;

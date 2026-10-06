@@ -50,6 +50,7 @@ qt_add_library(lf_ui STATIC
     dialogs/MediaPropertiesDialog.h dialogs/MediaPropertiesDialog.cpp
     dialogs/ProjectSettingsDialog.h dialogs/ProjectSettingsDialog.cpp
     project/ProjectController.h project/ProjectController.cpp
+    project/AutosaveManager.h project/AutosaveManager.cpp
     media/MediaModel.h      media/MediaModel.cpp
     media/MediaTileDelegate.h media/MediaTileDelegate.cpp
     media/ThumbnailService.h media/ThumbnailService.cpp

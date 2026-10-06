@@ -39,6 +39,7 @@
 #include "ui/playback/PlaybackController.h"
 #include "ui/preview/PreviewPanel.h"
 #include "ui/preview/PreviewWidget.h"
+#include "ui/project/AutosaveManager.h"
 #include "ui/project/ProjectController.h"
 #include "ui/timeline/TimelinePanel.h"
 #include "ui/timeline/TimelineView.h"
@@ -50,6 +51,7 @@
 #include <QCloseEvent>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QDirIterator>
 #include <QDockWidget>
 #include <QFile>
@@ -111,12 +113,21 @@ MainWindow::MainWindow(std::shared_ptr<hw::GpuDevice> gpu, std::shared_ptr<log::
     m_pages->addWidget(m_editor);
     m_toasts = new ToastHost(this);
 
+    // Startup cost per stage goes to the log (the window should appear in a few seconds on the target PC).
+    QElapsedTimer stage;
+    stage.start();
+    auto mark = [&stage](const char* what) { LF_LOG_DEBUG(kLog, "startup: {} {} ms", what, stage.restart()); };
+    mark("pages");
     buildMenus();
+    mark("menus");
     buildToolBar();
+    mark("toolbar");
     buildWorkspaceBar();
     buildPanels();
+    mark("panels");
     buildStatusBar();
     connectActions();
+    mark("status + actions");
     // Every action also lives on the window itself, so its shortcut works whatever
     // is visible (e.g. the menu bar is hidden in the full-screen viewer).
     for (ActionId id : m_actions->allIds()) addAction(m_actions->action(id));
@@ -163,6 +174,10 @@ MainWindow::~MainWindow() {
     m_browser = nullptr; m_projectInfo = nullptr; m_editor = nullptr; m_home = nullptr;
     delete m_playback; m_playback = nullptr;
     delete m_importer; m_importer = nullptr;
+    // Helpers that observe the document or run workers go before it.
+    delete m_autosave; m_autosave = nullptr;
+    delete m_exportController; m_exportController = nullptr;
+    delete m_proxies; m_proxies = nullptr;
     m_document.reset();
     LF_LOG_DEBUG(kLog, "main window shut down");
 }
@@ -409,23 +424,37 @@ QDockWidget* MainWindow::makeDock(const QString& title, const QString& objectNam
 }
 
 void MainWindow::buildPanels() {
+    QElapsedTimer panelTimer;
+    panelTimer.start();
+    auto mark = [&panelTimer](const char* what) { LF_LOG_DEBUG(kLog, "startup:   {} {} ms", what, panelTimer.restart()); };
     m_mediaPanel = new MediaPanel(*m_document, *m_actions, *m_importer, this);
     m_proxies = new ProxyController(*m_document, this);
     m_mediaPanel->setProxyController(m_proxies);
+    mark("media");
     m_previewPanel = new PreviewPanel(*m_actions, *m_playback, this);
+    mark("preview");
     m_inspectorPanel = new InspectorPanel(*m_document, this);
+    mark("inspector");
     m_timelinePanel = new TimelinePanel(*m_document, *m_actions, this);
     m_projectInfo = new ProjectInfoPanel(*m_document, *m_actions, this);
+    mark("timeline + project");
     m_effectsBrowser = new EffectsBrowserPanel(this);
+    mark("effects");
     m_titlesBrowser = new TitlesBrowserPanel(this);
     m_transitionsBrowser = new TransitionsBrowserPanel(this);
+    mark("titles + transitions");
     m_markersPanel = new MarkersPanel(*m_document, *m_actions, this);
+    mark("markers");
     m_mixerPanel = new MixerPanel(*m_document, *m_playback, this);
+    mark("mixer");
     m_scopesPanel = new ScopesPanel(*m_playback, this);
     m_performancePanel = new PerformancePanel(*m_document, *m_playback, *m_proxies, *m_actions, this);
+    mark("scopes + performance");
     m_exportController = new ExportController(m_gpu, this);
     m_exportSettings = new ExportSettingsPanel(*m_document, *m_exportController, this);
+    mark("export settings");
     m_exportQueue = new ExportQueuePanel(*m_exportController, this);
+    mark("export queue");
 
     m_browser = new BrowserPanel(this);
     m_browser->addPage(m_mediaPanel, tr("Media"), QStringLiteral("media"), tr("Imported media and bins"));
@@ -538,6 +567,22 @@ void MainWindow::connectActions() {
         m_importer->importWithDialog(this);
     });
     connect(m_home, &HomeScreen::clearRecentRequested, m_project, &ProjectController::clearRecentFiles);
+    m_autosave = new AutosaveManager(*m_document, this);
+    connect(m_project, &ProjectController::projectSaved, m_autosave, [this] { m_autosave->discardOwn(); });
+    connect(m_home, &HomeScreen::openRecoveryRequested, this, [this](const QString& path) {
+        const auto rec = AutosaveManager::findRecoverable();
+        const QString original = rec && rec->projectFile == path ? rec->originalPath : QString();
+        if (!m_project->openRecovered(path, original, this)) return;
+        AutosaveManager::discard(path);   // this session's own autosave takes over from here
+        m_home->clearRecovery();
+        showEditor();
+        m_toasts->show(tr("Recovered your unsaved work. Save it to keep it."), ToastHost::Kind::Success, 6000);
+    });
+    connect(m_home, &HomeScreen::discardRecoveryRequested, this, [this](const QString& path) {
+        AutosaveManager::discard(path);
+        m_home->clearRecovery();
+        if (const auto rec = AutosaveManager::findRecoverable()) m_home->setRecovery(rec->projectFile, rec->name.isEmpty() ? tr("Untitled") : rec->name, rec->when);
+    });
 
     // Media
     m_actions->connect(ActionId::MediaImport, this, [this] { showEditor(); m_importer->importWithDialog(this); });
@@ -830,6 +875,8 @@ void MainWindow::connectActions() {
 void MainWindow::showHome() {
     m_playback->pause();
     m_home->setRecentProjects(m_project->recentFiles());
+    if (const auto rec = AutosaveManager::findRecoverable()) m_home->setRecovery(rec->projectFile, rec->name.isEmpty() ? tr("Untitled") : rec->name, rec->when);
+    else m_home->clearRecovery();
     m_pages->setCurrentWidget(m_home);
     updateWindowTitle();
 }
@@ -865,6 +912,7 @@ void MainWindow::newProjectFromHome() {
 void MainWindow::closeProject() {
     m_playback->pause();
     if (!m_project->maybeSave(this)) return;
+    m_autosave->discardOwn();
     m_document->setFilePath({});
     m_document->reset(project::Project{});
     m_playback->clearProgram();
@@ -1268,6 +1316,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         event->ignore();
         return;
     }
+    // The user chose to save or discard: this session's autosave is no longer needed.
+    if (m_autosave) m_autosave->discardOwn();
     QSettings settings;
     settings.setValue(QStringLiteral("window/geometry"), saveGeometry());
     if (m_layoutRestored) m_workspaces->saveSession();

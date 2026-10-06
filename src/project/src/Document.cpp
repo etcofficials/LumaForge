@@ -36,6 +36,7 @@ void Document::noteIdsInUse() {
 void Document::reset(Project project) {
     m_project = std::move(project);
     m_undo.clear();
+    m_modified = false;
     m_nextMediaId = m_nextClipId = m_nextTrackId = 1;
     noteIdsInUse();
     notify(Change{Change::Kind::Reset, {}, {}});

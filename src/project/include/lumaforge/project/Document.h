@@ -57,8 +57,10 @@ public:
     // File association
     [[nodiscard]] const std::string& filePath() const noexcept { return m_filePath; }
     void setFilePath(std::string path) { m_filePath = std::move(path); }
-    [[nodiscard]] bool isDirty() const noexcept { return !m_undo.isClean(); }
-    void markSaved() { m_undo.setClean(); }
+    [[nodiscard]] bool isDirty() const noexcept { return !m_undo.isClean() || m_modified; }
+    void markSaved() { m_undo.setClean(); m_modified = false; }
+    // Unsaved without an undo step (e.g. a project recovered from an autosave).
+    void markModified() { m_modified = true; notify(Change{Change::Kind::Settings, {}, {}}); }
 
     // Replaces the whole project (new / open) and clears history.
     void reset(Project project);
@@ -72,6 +74,7 @@ private:
     std::uint64_t m_nextClipId = 1;
     std::uint64_t m_nextTrackId = 1;
     std::string m_filePath;
+    bool m_modified = false;
 };
 
 }  // namespace lf::project

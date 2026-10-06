@@ -16,6 +16,10 @@
 #include "ui/widgets/ParamSlider.h"
 #include "ui/panels/MediaPanel.h"
 #include "ui/media/ProxyController.h"
+#include "ui/project/AutosaveManager.h"
+#include "ui/home/HomeScreen.h"
+#include "ui/AppPaths.h"
+#include "lumaforge/project/ProjectSerializer.h"
 #include "lumaforge/media/MediaProbe.h"
 #include "ui/panels/ScopesPanel.h"
 #include "ui/timeline/TimelineView.h"
@@ -30,6 +34,9 @@
 #include <QApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QLabel>
@@ -635,6 +642,61 @@ TEST_CASE("proxies: the controller makes a real proxy; the preview program uses 
     proxies->remove({id});
     CHECK(proxies->state(id) == ProxyController::State::None && proxies->overrides().empty());
     proxies->setUseProxies(false);
+}
+
+TEST_CASE("autosave writes unsaved work; a crashed session's autosave is offered and recovered; saves keep backups") {
+    newProject();
+    focusTimeline();
+    press(Qt::Key_T, Qt::ControlModifier);                 // unsaved work: a title
+    auto& doc = g_window->document();
+    auto* autosave = g_window->findChild<AutosaveManager*>();
+    CHECK(autosave != nullptr);
+    if (!autosave) return;
+    CHECK(autosave->autosaveNow());
+    CHECK(!autosave->autosaveNow());                       // nothing new since
+    const QDir dir(AppPaths::path(AppPaths::Kind::Autosave));
+    const QString own = dir.filePath(QStringLiteral("session-%1").arg(QCoreApplication::applicationPid()));
+    CHECK(QFile::exists(own + QStringLiteral(".lfproj")) && QFile::exists(own + QStringLiteral(".json")));
+    CHECK(!AutosaveManager::findRecoverable().has_value());   // our own session is alive
+
+    // A leftover from a session that died (pid 999999).
+    const QString dead = dir.filePath(QStringLiteral("session-999999"));
+    QFile::remove(dead + QStringLiteral(".lfproj"));
+    QFile::copy(own + QStringLiteral(".lfproj"), dead + QStringLiteral(".lfproj"));
+    QFile meta(own + QStringLiteral(".json"));
+    meta.open(QIODevice::ReadOnly);
+    QJsonObject obj = QJsonDocument::fromJson(meta.readAll()).object();
+    meta.close();
+    obj[QStringLiteral("pid")] = 999999;
+    obj[QStringLiteral("original")] = QStringLiteral("G:/Caches/tmp/lf_ui_tests/recovered.lfproj");
+    QFile deadMeta(dead + QStringLiteral(".json"));
+    deadMeta.open(QIODevice::WriteOnly | QIODevice::Truncate);
+    deadMeta.write(QJsonDocument(obj).toJson());
+    deadMeta.close();
+    const auto rec = AutosaveManager::findRecoverable();
+    CHECK(rec.has_value() && rec->projectFile == dead + QStringLiteral(".lfproj"));
+
+    // Recover through the Home screen's banner signal.
+    newProject();
+    CHECK(doc.project().sequence.clips.empty());
+    auto* home = g_window->findChild<HomeScreen*>();
+    CHECK(home != nullptr);
+    if (!home || !rec) return;
+    emit home->openRecoveryRequested(rec->projectFile);
+    pump();
+    CHECK(doc.project().sequence.clips.size() == 1);
+    CHECK(doc.isDirty());
+    CHECK(QString::fromStdString(doc.filePath()).endsWith(QStringLiteral("recovered.lfproj")));
+    CHECK(!QFile::exists(dead + QStringLiteral(".lfproj")));
+
+    // Backups: the second save keeps the first version.
+    const QString saveAs = QStringLiteral("G:/Caches/tmp/lf_ui_tests/backup test.lfproj");
+    QFile::remove(saveAs);
+    CHECK(project::serializer::saveToFile(doc.project(), saveAs.toStdString()));
+    AutosaveManager::backupBeforeSave(saveAs, QStringLiteral("Backup Test"), 10);
+    const QDir backups(QDir(AppPaths::path(AppPaths::Kind::Backups)).filePath(QStringLiteral("Backup Test")));
+    CHECK(backups.entryList({QStringLiteral("*.lfproj")}, QDir::Files).size() >= 1);
+    doc.markSaved();
 }
 
 int main(int argc, char** argv) {
