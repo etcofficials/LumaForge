@@ -48,6 +48,10 @@ public:
     using ProgressFn = std::function<void(const ExportProgress&)>;
     Result<ExportResult> run(const project::Project& snapshot, const ExportSettings& settings, const ProgressFn& progress, const std::atomic<bool>& cancel);
 
+    // Most clip decoders that were open at the same time during the last run()
+    // (decoders of clips no longer on screen are closed as the render advances).
+    [[nodiscard]] std::size_t peakOpenClips() const noexcept;
+
     // One composited frame at sequence time t, at width x height (0 = project size).
     Result<media::Image> renderFrame(const project::Project& snapshot, TimePoint t, int width = 0, int height = 0);
 

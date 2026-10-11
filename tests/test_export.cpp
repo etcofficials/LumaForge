@@ -625,3 +625,34 @@ TEST_CASE("export regressions (spec 80.31): tracks, mute/solo, speed, audio fade
         CHECK(!std::filesystem::exists(s.outputPath));
     }
 }
+
+TEST_CASE("export: decoders of clips that have left the screen are closed during long renders") {
+    auto g = gpu();
+    Project p = countdownProject();
+    // Replace the timeline with 10 back-to-back 9-frame clips of the same file (different In points).
+    const Clip* v = nullptr;
+    for (const auto& c : p.sequence.clips) if (c.kind == ClipKind::Video) v = &c;
+    CHECK(v != nullptr);
+    if (!v) return;
+    Clip base = *v;
+    std::vector<Clip> clips;
+    for (int i = 0; i < 10; ++i) {
+        Clip c = base;
+        c.id = ClipId{static_cast<std::uint64_t>(900 + i)};
+        c.link = ClipId::Invalid;
+        c.start = TimePoint{9 * i * frameDuration(fps::f30).ticks};
+        c.duration = Duration{9 * frameDuration(fps::f30).ticks};
+        c.sourceIn = TimePoint{(10 * i % 150) * frameDuration(fps::f30).ticks};
+        clips.push_back(c);
+    }
+    p.sequence.clips = clips;
+    ExportSettings s = smallSettings("decoder_release.mp4");
+    s.includeAudio = false;
+    Exporter exporter(g);
+    std::atomic<bool> no{false};
+    auto r = exporter.run(p, s, {}, no);
+    CHECK(static_cast<bool>(r));
+    if (r) CHECK(r->frames == 90);
+    // Idle decoders close after 15 frames, so at most 3 of the 10 clips are ever open together.
+    CHECK(exporter.peakOpenClips() >= 1 && exporter.peakOpenClips() <= 3);
+}

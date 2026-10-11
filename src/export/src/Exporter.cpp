@@ -112,6 +112,25 @@ struct Exporter::Impl {
     std::unique_ptr<render::Compositor> compositor;
     std::unique_ptr<playback::LayerFactory> layers;
     std::unordered_map<std::uint64_t, std::unique_ptr<ClipFrames>> clips;   // by layer key (clip id)
+    std::unordered_map<std::uint64_t, std::int64_t> lastUsed;              // layer key -> last frame index drawn
+    std::size_t peakOpen = 0;
+
+    // Long timelines: a decoder (and its GPU surfaces) per clip ever drawn would
+    // exhaust video memory on small GPUs (the GT 730 target lost its D3D11
+    // device ~30 clips into a reel). Clips not drawn for kIdleFrames are closed; a clip that
+    // returns re-opens and seeks, which is cheap by comparison.
+    static constexpr std::int64_t kIdleFrames = 15;
+    void prune(std::int64_t frame) {
+        for (auto it = clips.begin(); it != clips.end();) {
+            const auto used = lastUsed.find(it->first);
+            if (used == lastUsed.end() || frame - used->second > kIdleFrames) {
+                lastUsed.erase(it->first);
+                it = clips.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
 
     Status ensureDevice() {
         if (compositor) return Status::success();
@@ -128,7 +147,7 @@ struct Exporter::Impl {
     }
 
     // Composites the program at t into `target`.
-    Status compose(const playback::Program& program, TimePoint t, render::RenderTarget& target, int frameW, int frameH) {
+    Status compose(const playback::Program& program, TimePoint t, render::RenderTarget& target, int frameW, int frameH, std::int64_t frame = 0) {
         std::vector<playback::VideoLayerRequest> requests;
         program.videoLayersAt(t, requests);
         std::vector<render::Layer> built;
@@ -141,6 +160,8 @@ struct Exporter::Impl {
             }
             auto& source = clips[req.layerKey];
             if (!source) source = std::make_unique<ClipFrames>(req.path, req.isImage, gpu, compositor->texturePoolPtr());
+            lastUsed[req.layerKey] = frame;
+            peakOpen = std::max(peakOpen, clips.size());
             auto tex = source->frameAt(req.sourceTime);
             if (!tex) return Error{"A clip could not be decoded for export: " + req.path, tex.error().fullText()};
             built.push_back(playback::LayerFactory::media(req, std::move(tex.value())));
@@ -151,6 +172,8 @@ struct Exporter::Impl {
 
 Exporter::Exporter(std::shared_ptr<hw::GpuDevice> gpu) : m_impl(std::make_unique<Impl>()) { m_impl->gpu = std::move(gpu); }
 Exporter::~Exporter() = default;
+
+std::size_t Exporter::peakOpenClips() const noexcept { return m_impl->peakOpen; }
 
 Result<media::Image> Exporter::renderFrame(const project::Project& snapshot, TimePoint t, int width, int height) {
     Impl& d = *m_impl;
@@ -212,6 +235,9 @@ Result<ExportResult> Exporter::run(const project::Project& original, const Expor
         return result;
     }
     if (auto s = d.ensureDevice(); !s) return s.error();
+    d.clips.clear();
+    d.lastUsed.clear();
+    d.peakOpen = 0;
 
     int w = 0, h = 0;
     outputSize(settings, snapshot, w, h);
@@ -283,7 +309,8 @@ Result<ExportResult> Exporter::run(const project::Project& original, const Expor
     for (std::int64_t i = 0; i < total; ++i) {
         if (cancel.load()) return cleanup(Error{"Export cancelled."});
         const TimePoint t{range.start.ticks + timeOfFrame(i, fps).ticks};
-        if (auto s = d.compose(*program, t, **target, snapshot.settings.width, snapshot.settings.height); !s) return cleanup(s.error());
+        if (auto s = d.compose(*program, t, **target, snapshot.settings.width, snapshot.settings.height, i); !s) return cleanup(s.error());
+        d.prune(i);
         if (auto s = d.compositor->readback(**target, bgra); !s) return cleanup(s.error());
         if (auto s = (*muxer)->writeVideo(bgra.data(), w * 4, i); !s) return cleanup(s.error());
         if (audio) {
