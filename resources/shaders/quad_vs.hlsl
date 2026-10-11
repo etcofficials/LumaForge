@@ -12,6 +12,10 @@ cbuffer LayerConstants : register(b0) {
     int4     mode;        // planeMode, flags, flipBits, unused
     float4   misc;        // vignetteAmount, texelW, texelH, unused
     float4   fx;          // grayscale, sepia, blur, sharpen
+    float4   fx2;         // invert, posterize, pixelate, unused
+    float4   mask0;       // mask centre / half size
+    float4   mask1;       // mask feather, shape, invert
+    float4   fx3;         // directional blur step
 };
 
 struct VSOut {

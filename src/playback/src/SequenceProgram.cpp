@@ -1,6 +1,7 @@
 #include "lumaforge/playback/SequenceProgram.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace lf::playback {
 
@@ -177,9 +178,31 @@ void SequenceProgram::transitionLayers(const std::vector<VisualEntry>& entries, 
                 push(a);
             }
             break;
+        case T::WhipLeft:
+        case T::WhipRight:
+        case T::WhipUp:
+        case T::WhipDown: {
+            // Push geometry on an ease-in-out curve (slow, very fast, slow) with a
+            // directional streak proportional to the speed, peaking at the cut.
+            const bool vertical = w.transition.type == T::WhipUp || w.transition.type == T::WhipDown;
+            const float dir = (w.transition.type == T::WhipLeft || w.transition.type == T::WhipUp) ? 1.0f : -1.0f;
+            const float e = p < 0.5f ? 4.0f * p * p * p : 1.0f - std::pow(-2.0f * p + 2.0f, 3.0f) / 2.0f;
+            const float speed = std::sin(p * 3.14159265f);           // 0 at the ends, 1 at the cut
+            const float extent = vertical ? fh : fw;
+            auto whip = [&](std::optional<VideoLayerRequest>& r, float offset) {
+                if (!r) return;
+                (vertical ? r->transform.positionY : r->transform.positionX) += offset;
+                r->effects.directionalBlur = std::max(r->effects.directionalBlur, 0.22f * speed * speed);
+                r->effects.directionalBlurAngle = vertical ? 90.0f : 0.0f;
+            };
+            whip(b, dir * (1.0f - e) * extent);
+            whip(a, -dir * e * extent);
+            push(a);
+            push(b);
+            break;
+        }
         case T::Count: push(a); push(b); break;
     }
-    (void)fh;
 }
 
 void SequenceProgram::videoLayersAt(TimePoint t, std::vector<VideoLayerRequest>& out) const {

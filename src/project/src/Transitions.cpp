@@ -21,6 +21,10 @@ constexpr TransitionInfo kInfo[] = {
     {"pushLeft",      "Push Left",      "Motion",    "The incoming picture pushes the outgoing one out to the left"},
     {"pushRight",     "Push Right",     "Motion",    "The incoming picture pushes the outgoing one out to the right"},
     {"zoom",          "Zoom",           "Motion",    "The outgoing picture zooms towards the viewer as it fades away"},
+    {"whipLeft",      "Whip Pan Left",  "Motion",    "Fast camera-whip: both pictures streak out to the left with motion blur"},
+    {"whipRight",     "Whip Pan Right", "Motion",    "Fast camera-whip: both pictures streak out to the right with motion blur"},
+    {"whipUp",        "Whip Pan Up",    "Motion",    "Fast camera-whip upwards with vertical motion blur"},
+    {"whipDown",      "Whip Pan Down",  "Motion",    "Fast camera-whip downwards with vertical motion blur"},
 };
 static_assert(std::size(kInfo) == static_cast<std::size_t>(TransitionType::Count));
 }  // namespace

@@ -12,13 +12,15 @@ cbuffer LayerConstants : register(b0) {
     float4   adjust2;     // shadows, gamma, vibrance, hue
     int4     mode;        // x: 0 = NV12 (t0=Y R8, t1=UV RG8), 1 = I420 (t0,t1,t2 R8), 2 = BGRA (t0)
                           // y: flags  1 grayscale, 2 sepia, 4 vignette, 8 input premultiplied, 16 skip colour math,
-                          //           32 blur, 64 sharpen, 128 invert, 256 posterize, 512 pixelate
+                          //           32 blur, 64 sharpen, 128 invert, 256 posterize, 512 pixelate,
+                          //           1024 directional blur
                           //        z: 1 flip H, 2 flip V
     float4   misc;        // vignetteAmount, texelW, texelH, crop feather (source pixels)
     float4   fx;          // grayscale mix, sepia mix, blur radius (texels), sharpen amount
     float4   fx2;         // invert mix, posterize levels, pixelate block (source pixels), unused
     float4   mask0;       // centre x, centre y, half width, half height (uv)
     float4   mask1;       // feather (fraction of the size), shape (0 none, 1 rect, 2 ellipse), invert
+    float4   fx3;         // directional blur: uv step x, uv step y (whole streak), unused, unused
 };
 
 Texture2D tex0 : register(t0);
@@ -76,6 +78,23 @@ float4 blurred(float2 uv, float radius) {
     return acc / 13.0;
 }
 
+// Directional (motion) blur: 15 taps along the streak with a tent weighting,
+// so the centre of the streak dominates and the ends fade (no hard ghosting).
+float4 streaked(float2 uv) {
+    float2 lo = uvRect.xy, hi = uvRect.zw;
+    float4 acc = 0.0;
+    float total = 0.0;
+    [unroll] for (int i = -7; i <= 7; ++i) {
+        float w = 8.0 - abs((float)i);
+        float2 p = clamp(uv + fx3.xy * ((float)i / 14.0), lo, hi);
+        float4 c = sampleSource(p);
+        acc += float4(c.rgb * c.a, c.a) * w;   // average premultiplied, so transparent texels do not tint
+        total += w;
+    }
+    acc /= total;
+    return float4(acc.a > 0.0 ? acc.rgb / acc.a : acc.rgb, acc.a);
+}
+
 float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
     // Outside the crop rectangle: transparent.
     if (uv.x < uvRect.x || uv.x > uvRect.z || uv.y < uvRect.y || uv.y > uvRect.w) return float4(0, 0, 0, 0);
@@ -86,7 +105,8 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
         float2 block = fx2.z * misc.yz;
         uv = clamp(uvRect.xy + (floor((uv - uvRect.xy) / block) + 0.5) * block, uvRect.xy, uvRect.zw);
     }
-    float4 src = (flags & 32) ? blurred(uv, fx.z) : sampleSource(uv);
+    // A directional streak replaces the round blur when both are set (one blur pass per layer).
+    float4 src = (flags & 1024) ? streaked(uv) : (flags & 32) ? blurred(uv, fx.z) : sampleSource(uv);
     float3 rgb = src.rgb;
     float alpha = src.a;
     if (flags & 64) {

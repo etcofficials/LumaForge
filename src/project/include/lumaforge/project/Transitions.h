@@ -19,6 +19,7 @@ namespace lf::project {
 enum class TransitionType {
     CrossDissolve, DipToBlack, DipToWhite, WipeLeft, WipeRight, WipeUp, WipeDown,
     SlideLeft, SlideRight, PushLeft, PushRight, Zoom,
+    WhipLeft, WhipRight, WhipUp, WhipDown,
     Count
 };
 

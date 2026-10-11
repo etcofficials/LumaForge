@@ -203,3 +203,46 @@ TEST_CASE("split leaves the new cut plain; transitions survive undo/redo and rou
     CHECK(static_cast<bool>(f2) && !f2->project.sequence.findClip(f.a)->transitionIn.has_value());
     CHECK(transitionTypeFromId(transitionInfo(TransitionType::PushRight).id) == TransitionType::PushRight);
 }
+
+TEST_CASE("whip pan transitions: eased push with a streak that peaks at the cut") {
+    Fixture f;
+    f.B().transitionIn = Transition{TransitionType::WhipLeft, dsec(1)};
+    std::vector<playback::VideoLayerRequest> layers;
+    {
+        playback::SequenceProgram program(f.p);
+        program.videoLayersAt(sec(4), layers);   // the cut = middle of the window
+        CHECK(layers.size() == 2);
+        if (layers.size() == 2) {
+            CHECK(near(layers[0].transform.positionX, -960.0f, 1.0f) && near(layers[1].transform.positionX, 960.0f, 1.0f));
+            CHECK(near(layers[0].effects.directionalBlur, 0.22f) && near(layers[1].effects.directionalBlur, 0.22f));
+            CHECK(layers[0].effects.directionalBlurAngle == 0.0f);
+        }
+        layers.clear();
+        program.videoLayersAt(sec(3.6), layers);   // 10% in: barely moving, little blur (ease-in)
+        CHECK(layers.size() == 2);
+        if (layers.size() == 2) {
+            CHECK(layers[0].transform.positionX > -20.0f && layers[0].transform.positionX < 0.0f);
+            CHECK(layers[0].effects.directionalBlur > 0.0f && layers[0].effects.directionalBlur < 0.03f);
+        }
+        layers.clear();
+        program.videoLayersAt(sec(4.5), layers);   // after the window: B alone, untouched
+        CHECK(layers.size() == 1 && layers[0].transform.positionX == 0.0f && layers[0].effects.directionalBlur == 0.0f);
+    }
+    f.B().transitionIn->type = TransitionType::WhipUp;
+    {
+        playback::SequenceProgram program(f.p);
+        layers.clear();
+        program.videoLayersAt(sec(4), layers);
+        CHECK(layers.size() == 2);
+        if (layers.size() == 2) {
+            CHECK(near(layers[0].transform.positionY, -540.0f, 1.0f) && near(layers[1].transform.positionY, 540.0f, 1.0f));
+            CHECK(layers[0].effects.directionalBlurAngle == 90.0f && layers[0].transform.positionX == 0.0f);
+        }
+    }
+    CHECK(transitionTypeFromId("whipRight") == TransitionType::WhipRight);
+    // Round-trips through the project file.
+    const std::string json = serializer::toJson(f.p, "G:/Caches/tmp");
+    auto back = serializer::fromJson(json, "G:/Caches/tmp");
+    CHECK(static_cast<bool>(back));
+    if (back) CHECK(back->project.sequence.findClip(f.b)->transitionIn->type == TransitionType::WhipUp);
+}

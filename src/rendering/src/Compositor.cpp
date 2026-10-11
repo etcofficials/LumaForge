@@ -33,6 +33,7 @@ struct alignas(16) LayerConstants {
     float fx2[4];         // invert mix, posterize levels, pixelate block (source pixels), unused
     float mask0[4];       // centre x, centre y, half width, half height (uv)
     float mask1[4];       // feather (fraction), shape (0 none, 1 rect, 2 ellipse), invert, unused
+    float fx3[4];         // directional blur: whole-streak uv step x, y, unused, unused
 };
 static_assert(sizeof(LayerConstants) % 16 == 0);
 
@@ -249,6 +250,14 @@ void Compositor::drawLayer(const Layer& layer, int frameW, int frameH, int targe
     if (fx.invert > 0.0f) flags |= 128;
     if (fx.posterize > 0.0f) flags |= 256;
     if (fx.pixelate > 1.0f) flags |= 512;
+    if (fx.directionalBlur > 0.0f) {
+        // Length is a fraction of the picture width; in uv units the vertical
+        // component is scaled by the aspect so the streak is round-true.
+        flags |= 1024;
+        const float r = fx.directionalBlurAngle * kPi / 180.0f;
+        k.fx3[0] = fx.directionalBlur * std::cos(r);
+        k.fx3[1] = fx.directionalBlur * std::sin(r) * static_cast<float>(tex.width()) / static_cast<float>(tex.height());
+    }
     if (layer.mask.isActive()) {
         k.mask0[0] = layer.mask.centerX;
         k.mask0[1] = layer.mask.centerY;

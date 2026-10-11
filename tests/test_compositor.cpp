@@ -245,3 +245,72 @@ TEST_CASE("compositor: ellipse mask (with invert), pixelate/posterize/invert, ad
     CHECK(std::abs(pixel(out, 64, 32, 32).r - grey) <= 3);   // inside: adjusted
     CHECK(pixel(out, 64, 2, 2).r > 190);                       // outside: untouched red
 }
+
+TEST_CASE("compositor: directional blur streaks along its angle only") {
+    auto gpu = hw::GpuDevice::create({});
+    if (!gpu) return;
+    auto comp = Compositor::create(*gpu);
+    if (!comp) return;
+    // 64x64: left half black, right half white -> one vertical edge at x = 32.
+    auto edge = (*comp)->texturePool().acquireBgra(64, 64, true);
+    if (!edge) return;
+    std::vector<std::uint8_t> px(64 * 64 * 4);
+    for (int y = 0; y < 64; ++y)
+        for (int x = 0; x < 64; ++x) {
+            const std::size_t i = (static_cast<std::size_t>(y) * 64 + x) * 4;
+            const std::uint8_t v = x < 32 ? 0 : 255;
+            px[i] = px[i + 1] = px[i + 2] = v;
+            px[i + 3] = 255;
+        }
+    (*edge)->fillBgra(px.data(), 64 * 4, false);
+    auto target = (*comp)->createTarget(64, 64);
+    if (!target) return;
+    std::vector<std::uint8_t> out;
+    Layer layer;
+    layer.texture = *edge;
+    Layer plain[] = {layer};
+    (*comp)->compose(**target, 64, 64, plain, Rgba{0, 0, 0, 1});
+    (*comp)->readback(**target, out);
+    CHECK(pixel(out, 64, 29, 32).r < 5 && pixel(out, 64, 35, 32).r > 250);   // sharp edge without the effect
+
+    // Horizontal streak of 25% of the width (16 px): pixels near the edge mix both sides.
+    EffectParams h;
+    h.directionalBlur = 0.25f;
+    h.directionalBlurAngle = 0.0f;
+    layer.effects = h;
+    Layer hl[] = {layer};
+    (*comp)->compose(**target, 64, 64, hl, Rgba{0, 0, 0, 1});
+    (*comp)->readback(**target, out);
+    const int left = pixel(out, 64, 29, 32).r, right = pixel(out, 64, 35, 32).r;
+    CHECK(left > 20 && left < 128);
+    CHECK(right > 128 && right < 235);
+    CHECK(pixel(out, 64, 2, 32).r < 5 && pixel(out, 64, 61, 32).r > 250);   // far from the edge: unchanged
+
+    // Vertical streak: the edge is parallel to the streak, so it stays sharp.
+    layer.effects.directionalBlurAngle = 90.0f;
+    Layer vl[] = {layer};
+    (*comp)->compose(**target, 64, 64, vl, Rgba{0, 0, 0, 1});
+    (*comp)->readback(**target, out);
+    CHECK(pixel(out, 64, 29, 32).r < 5 && pixel(out, 64, 35, 32).r > 250);
+}
+
+TEST_CASE("effects: directional blur effects flatten to one streak (length, angle)") {
+    std::vector<Effect> fx{makeEffect(EffectType::DirectionalBlurH)};
+    fx[0].amount = 10.0f;   // 10% of the width
+    ColorAdjust color;
+    EffectParams looks;
+    applyEffects(fx, color, looks);
+    CHECK(std::fabs(looks.directionalBlur - 0.10f) < 1e-5f && std::fabs(looks.directionalBlurAngle) < 1e-3f);
+    Effect v = makeEffect(EffectType::DirectionalBlurV);
+    v.amount = 10.0f;
+    fx.push_back(v);
+    looks = {};
+    applyEffects(fx, color, looks);
+    CHECK(std::fabs(looks.directionalBlur - 0.1414f) < 1e-3f && std::fabs(looks.directionalBlurAngle - 45.0f) < 1e-2f);
+    CHECK(effectTypeFromId("directionalBlurH") == EffectType::DirectionalBlurH);
+    CHECK(effectTypeFromId("directionalBlurV") == EffectType::DirectionalBlurV);
+    fx[0].enabled = fx[1].enabled = false;
+    looks = {};
+    applyEffects(fx, color, looks);
+    CHECK(looks.directionalBlur == 0.0f && looks.isIdentity());
+}

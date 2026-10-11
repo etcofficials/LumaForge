@@ -1,6 +1,7 @@
 #include "lumaforge/core/VisualParams.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace lf {
@@ -25,6 +26,8 @@ constexpr EffectInfo kInfo[] = {
     {"invert",      "Invert",       0.0f,   1.0f,  1.0f, 2, "",        C::Stylize,     "Photographic negative (amount mixes with the original)"},
     {"posterize",   "Posterize",    2.0f,  32.0f,  6.0f, 0, " levels", C::Stylize,     "Reduces each channel to a few flat levels"},
     {"pixelate",    "Pixelate",     2.0f,  96.0f, 16.0f, 0, " px",     C::Stylize,     "Large square blocks (block size in source pixels)"},
+    {"directionalBlurH", "Directional Blur (Horizontal)", 0.0f, 30.0f, 4.0f, 1, "%", C::BlurSharpen, "Horizontal motion streak (length in % of the picture width)"},
+    {"directionalBlurV", "Directional Blur (Vertical)",   0.0f, 30.0f, 4.0f, 1, "%", C::BlurSharpen, "Vertical motion streak (length in % of the picture width)"},
 };
 static_assert(sizeof(kInfo) / sizeof(kInfo[0]) == static_cast<std::size_t>(EffectType::Count));
 }  // namespace
@@ -56,6 +59,8 @@ Effect makeEffect(EffectType type) noexcept {
 }
 
 void applyEffects(const std::vector<Effect>& effects, ColorAdjust& color, EffectParams& looks) noexcept {
+    // Directional streaks add as vectors (fractions of the picture width).
+    float streakX = 0.0f, streakY = 0.0f;
     for (const Effect& e : effects) {
         if (!e.enabled) continue;
         const EffectInfo& info = effectInfo(e.type);
@@ -78,8 +83,18 @@ void applyEffects(const std::vector<Effect>& effects, ColorAdjust& color, Effect
             // Stacked posterize keeps the coarsest; stacked pixelate the largest block.
             case EffectType::Posterize:  looks.posterize = looks.posterize > 0.0f ? std::min(looks.posterize, a) : a; break;
             case EffectType::Pixelate:   looks.pixelate = std::max(looks.pixelate, a); break;
+            case EffectType::DirectionalBlurH: streakX += a / 100.0f; break;
+            case EffectType::DirectionalBlurV: streakY += a / 100.0f; break;
             case EffectType::Count:      break;
         }
+    }
+    if (streakX != 0.0f || streakY != 0.0f) {
+        // Combine with a streak already present (e.g. from a whip transition).
+        const float r = looks.directionalBlurAngle * 3.14159265f / 180.0f;
+        streakX += looks.directionalBlur * std::cos(r);
+        streakY += looks.directionalBlur * std::sin(r);
+        looks.directionalBlur = std::sqrt(streakX * streakX + streakY * streakY);
+        looks.directionalBlurAngle = std::atan2(streakY, streakX) * 180.0f / 3.14159265f;
     }
 }
 

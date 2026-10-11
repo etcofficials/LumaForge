@@ -80,6 +80,7 @@ struct ColorAdjust {
 enum class EffectType {
     Brightness, Contrast, Saturation, Grayscale, Sepia, Blur, Sharpen, Vignette,
     Exposure, Temperature, Tint, HueShift, Vibrance, Invert, Posterize, Pixelate,
+    DirectionalBlurH, DirectionalBlurV,
     Count
 };
 
@@ -117,9 +118,14 @@ struct EffectParams {
     float invert = 0.0f;      // 0..1 mix
     float posterize = 0.0f;   // levels per channel, 0 = off
     float pixelate = 0.0f;    // block size in source pixels, 0 = off
+    // Streak along one direction in the picture (motion / whip-pan blur).
+    // Length is a fraction of the picture width so it reads the same at any
+    // source resolution; the angle is in degrees, 0 = horizontal, 90 = vertical.
+    float directionalBlur = 0.0f;
+    float directionalBlurAngle = 0.0f;
     [[nodiscard]] constexpr bool isIdentity() const noexcept {
         return grayscale == 0.0f && sepia == 0.0f && vignette == 0.0f && blur == 0.0f && sharpen == 0.0f && invert == 0.0f && posterize == 0.0f &&
-               pixelate == 0.0f;
+               pixelate == 0.0f && directionalBlur == 0.0f;
     }
     friend constexpr bool operator==(const EffectParams&, const EffectParams&) = default;
 };

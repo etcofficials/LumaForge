@@ -11,6 +11,7 @@ add_subdirectory(rendering)
 add_subdirectory(audio)
 add_subdirectory(playback)
 add_subdirectory(export)
+add_subdirectory(render_cli)
 
 add_subdirectory(ui)
 add_subdirectory(app)
