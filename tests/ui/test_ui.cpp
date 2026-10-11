@@ -330,7 +330,7 @@ TEST_CASE("media panel: type and usage filters, bins, rename") {
     auto make = [&doc](const char* name, media::MediaType type) {
         project::MediaItem m;
         m.id = doc.allocateMediaId();
-        m.path = std::string("G:/Caches/tmp/lf_ui_tests/") + name;
+        m.path = std::string(LF_TEST_TMP_DIR "/lf_ui_tests/") + name;
         m.displayName = name;
         m.info.type = type;
         m.info.duration = Duration::fromSeconds(3);
@@ -383,7 +383,7 @@ TEST_CASE("inspector tabs re-laid out when the selection changes kind (video -> 
     auto& doc = g_window->document();
     project::MediaItem m;
     m.id = doc.allocateMediaId();
-    m.path = "G:/Caches/tmp/lf_ui_tests/v.mp4";
+    m.path = LF_TEST_TMP_DIR "/lf_ui_tests/v.mp4";
     m.displayName = "v.mp4";
     m.info.type = media::MediaType::Video;
     m.info.duration = Duration::fromSeconds(6);
@@ -563,7 +563,7 @@ TEST_CASE("export: Ctrl+M opens the Export workspace; the panel queues a render 
     auto* path = g_window->findChild<QLineEdit*>(QStringLiteral("exportPath"));
     CHECK(path != nullptr);
     if (!path) return;
-    const QString out = QStringLiteral("G:/Caches/tmp/lf_ui_tests/export test.mp4");
+    const QString out = QStringLiteral(LF_TEST_TMP_DIR "/lf_ui_tests/export test.mp4");
     QFile::remove(out);
     path->setText(QDir::toNativeSeparators(out));
     const auto s = panel->settings();
@@ -773,7 +773,7 @@ TEST_CASE("autosave writes unsaved work; a crashed session's autosave is offered
     QJsonObject obj = QJsonDocument::fromJson(meta.readAll()).object();
     meta.close();
     obj[QStringLiteral("pid")] = 999999;
-    obj[QStringLiteral("original")] = QStringLiteral("G:/Caches/tmp/lf_ui_tests/recovered.lfproj");
+    obj[QStringLiteral("original")] = QStringLiteral(LF_TEST_TMP_DIR "/lf_ui_tests/recovered.lfproj");
     QFile deadMeta(dead + QStringLiteral(".json"));
     deadMeta.open(QIODevice::WriteOnly | QIODevice::Truncate);
     deadMeta.write(QJsonDocument(obj).toJson());
@@ -795,7 +795,7 @@ TEST_CASE("autosave writes unsaved work; a crashed session's autosave is offered
     CHECK(!QFile::exists(dead + QStringLiteral(".lfproj")));
 
     // Backups: the second save keeps the first version.
-    const QString saveAs = QStringLiteral("G:/Caches/tmp/lf_ui_tests/backup test.lfproj");
+    const QString saveAs = QStringLiteral(LF_TEST_TMP_DIR "/lf_ui_tests/backup test.lfproj");
     QFile::remove(saveAs);
     CHECK(project::serializer::saveToFile(doc.project(), saveAs.toStdString()));
     AutosaveManager::backupBeforeSave(saveAs, QStringLiteral("Backup Test"), 10);
@@ -842,7 +842,7 @@ TEST_CASE("settings: Ctrl+, opens the dialog; autosave interval and transition l
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     // Isolated settings + data folder so the tests never touch the user's configuration.
-    const QString root = QStringLiteral("G:/Caches/tmp/lf_ui_tests");
+    const QString root = QStringLiteral(LF_TEST_TMP_DIR "/lf_ui_tests");
     QDir(root).removeRecursively();
     QDir().mkpath(root);
     QCoreApplication::setOrganizationName(QStringLiteral("LumaForgeTests"));

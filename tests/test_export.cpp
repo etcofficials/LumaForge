@@ -23,7 +23,7 @@ using namespace lf::exporting;
 namespace {
 
 std::string mediaPath(const char* name) { return std::string(LF_TEST_MEDIA_DIR) + "/" + name; }
-const std::string kOutDir = "G:/Caches/tmp/lf_export_tests";
+const std::string kOutDir = LF_TEST_TMP_DIR "/lf_export_tests";
 
 // A project with countdown_720p30.mp4 (6 s, H.264 + AAC) on V1/A1.
 Project countdownProject() {
@@ -66,7 +66,7 @@ std::shared_ptr<hw::GpuDevice> gpu() {
 TEST_CASE("export settings: presets, sizes, ranges, validation, offline media") {
     Project p = countdownProject();
     ExportSettings s;
-    s.outputPath = "G:/Caches/tmp/out.mp4";
+    s.outputPath = LF_TEST_TMP_DIR "/out.mp4";
     int w = 0, h = 0;
     outputSize(s, p, w, h);
     CHECK(w == 1280 && h == 720);

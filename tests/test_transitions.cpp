@@ -27,7 +27,7 @@ struct Fixture {
     Fixture() {
         MediaItem m;
         m.id = MediaId{1};
-        m.path = "G:/Caches/tmp/does-not-matter.mp4";
+        m.path = LF_TEST_TMP_DIR "/does-not-matter.mp4";
         m.info.type = media::MediaType::Video;
         m.info.duration = dsec(20);
         media::VideoStreamInfo v; v.width = 1920; v.height = 1080; v.frameRate = fps::f30; m.info.video = v;
@@ -241,8 +241,8 @@ TEST_CASE("whip pan transitions: eased push with a streak that peaks at the cut"
     }
     CHECK(transitionTypeFromId("whipRight") == TransitionType::WhipRight);
     // Round-trips through the project file.
-    const std::string json = serializer::toJson(f.p, "G:/Caches/tmp");
-    auto back = serializer::fromJson(json, "G:/Caches/tmp");
+    const std::string json = serializer::toJson(f.p, LF_TEST_TMP_DIR);
+    auto back = serializer::fromJson(json, LF_TEST_TMP_DIR);
     CHECK(static_cast<bool>(back));
     if (back) CHECK(back->project.sequence.findClip(f.b)->transitionIn->type == TransitionType::WhipUp);
 }

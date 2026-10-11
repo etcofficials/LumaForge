@@ -218,8 +218,8 @@ TEST_CASE("serializer v8: pan, audio fx, track volume/pan, master, reverse/freez
 TEST_CASE("voice-over recorder: records a valid WAV when a microphone exists") {
     auto rec = audio::AudioRecorder::create();
     if (!rec) { std::printf("    (no microphone: %s)\n", rec.error().fullText().c_str()); return; }
-    const std::string path = "G:/Caches/tmp/lf_export_tests/recording.wav";
-    std::filesystem::create_directories("G:/Caches/tmp/lf_export_tests");
+    const std::string path = LF_TEST_TMP_DIR "/lf_export_tests/recording.wav";
+    std::filesystem::create_directories(LF_TEST_TMP_DIR "/lf_export_tests");
     auto started = (*rec)->start(path);
     if (!started) { std::printf("    (microphone not usable: %s)\n", started.error().fullText().c_str()); return; }
     std::this_thread::sleep_for(std::chrono::milliseconds(600));
@@ -231,9 +231,10 @@ TEST_CASE("voice-over recorder: records a valid WAV when a microphone exists") {
     if (info) CHECK(std::abs(info->duration.toSeconds() - length->toSeconds()) < 0.05 && length->toSeconds() > 0.3);
 }
 
-TEST_CASE("master limiter ceiling: -1 dBFS holds a +12 dB overload, round-trips, defaults to -0.3") {
+TEST_CASE("master limiter ceiling: -1 dBFS holds a +12 dBFS overload, round-trips, defaults to -0.3") {
     Project p = toneProject();
-    for (auto& c : p.sequence.clips) c.audio.volume = 4.0f;   // +12 dB into the limiter
+    // tone_44k.wav peaks at -18 dBFS; +30 dB of clip gain drives the limiter about 12 dB over full scale.
+    for (auto& c : p.sequence.clips) c.audio.volume = 32.0f;
     CHECK(p.sequence.masterCeilingDb == -0.3f);
     auto loud = mix(p, sec(0.2), 48000);
     CHECK(peak(loud.data(), loud.size()) <= std::pow(10.0f, -0.3f / 20.0f) + 1e-4f);

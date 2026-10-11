@@ -94,7 +94,7 @@ TEST_CASE("subtitles: export writes an .srt sidecar for the range") {
     Project p = doc.project();
     p.settings.width = 320;
     p.settings.height = 180;
-    const std::string dir = "G:/Caches/tmp/lf_export_tests";
+    const std::string dir = LF_TEST_TMP_DIR "/lf_export_tests";
     std::filesystem::create_directories(dir);
     exporting::ExportSettings s;
     s.outputPath = dir + "/subs.mp4";

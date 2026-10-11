@@ -24,14 +24,15 @@ add_executable(lf_tests
     test_audio.cpp
 )
 target_link_libraries(lf_tests PRIVATE lumaforge::core lumaforge::commands lumaforge::rendering lumaforge::media lumaforge::project lumaforge::hardware lumaforge::playback lumaforge::audio lumaforge::export)
-target_compile_definitions(lf_tests PRIVATE LF_TEST_MEDIA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")
+set(LUMAFORGE_TEST_TMP_DIR "G:/Caches/tmp" CACHE PATH "Scratch folder the tests write into")
+target_compile_definitions(lf_tests PRIVATE LF_TEST_MEDIA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media" LF_TEST_TMP_DIR="${LUMAFORGE_TEST_TMP_DIR}")
 add_test(NAME lf_tests COMMAND lf_tests)
 
 # UI tests: a real MainWindow without a GPU, driven by synthetic key events
 # through QWindowSystemInterface (Qt::GuiPrivate), on the offscreen platform.
 add_executable(lf_ui_tests TestMain.h ui/test_ui.cpp)
 target_link_libraries(lf_ui_tests PRIVATE lumaforge::ui Qt6::Widgets Qt6::GuiPrivate)
-target_compile_definitions(lf_ui_tests PRIVATE LF_TEST_MEDIA_DIR_UI="${CMAKE_CURRENT_SOURCE_DIR}/media")
+target_compile_definitions(lf_ui_tests PRIVATE LF_TEST_MEDIA_DIR_UI="${CMAKE_CURRENT_SOURCE_DIR}/media" LF_TEST_TMP_DIR="${LUMAFORGE_TEST_TMP_DIR}")
 get_target_property(_lf_qmake Qt6::qmake IMPORTED_LOCATION)
 get_filename_component(_lf_qt_root "${_lf_qmake}/../.." ABSOLUTE)
 add_custom_command(TARGET lf_ui_tests POST_BUILD
