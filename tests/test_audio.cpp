@@ -230,3 +230,18 @@ TEST_CASE("voice-over recorder: records a valid WAV when a microphone exists") {
     CHECK(info && info->hasAudio() && info->audio->sampleRate == 48000 && info->audio->channels == 2);
     if (info) CHECK(std::abs(info->duration.toSeconds() - length->toSeconds()) < 0.05 && length->toSeconds() > 0.3);
 }
+
+TEST_CASE("master limiter ceiling: -1 dBFS holds a +12 dB overload, round-trips, defaults to -0.3") {
+    Project p = toneProject();
+    for (auto& c : p.sequence.clips) c.audio.volume = 4.0f;   // +12 dB into the limiter
+    CHECK(p.sequence.masterCeilingDb == -0.3f);
+    auto loud = mix(p, sec(0.2), 48000);
+    CHECK(peak(loud.data(), loud.size()) <= std::pow(10.0f, -0.3f / 20.0f) + 1e-4f);
+    CHECK(peak(loud.data(), loud.size()) > std::pow(10.0f, -1.0f / 20.0f));   // default ceiling lets it above -1 dBFS
+    p.sequence.masterCeilingDb = -1.0f;
+    auto held = mix(p, sec(0.2), 48000);
+    CHECK(peak(held.data(), held.size()) <= std::pow(10.0f, -1.0f / 20.0f) + 1e-4f);
+    auto loaded = serializer::fromJson(serializer::toJson(p, ""), "");
+    CHECK(static_cast<bool>(loaded));
+    if (loaded) CHECK(loaded->project.sequence.masterCeilingDb == -1.0f);
+}

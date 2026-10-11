@@ -188,7 +188,13 @@ void AudioMixer::render(float* out, int frames) {
     }
     const float master = m_program->masterGain();
     for (int i = 0; i < frames * m_channels; ++i) out[i] *= master;
-    if (m_program->masterLimiter()) m_limiter.process(out, frames, m_channels);
+    if (m_program->masterLimiter()) {
+        if (const float ceiling = m_program->masterCeilingDb(); ceiling != m_limiterCeilingDb) {
+            m_limiter.set(m_rate, ceiling);
+            m_limiterCeilingDb = ceiling;
+        }
+        m_limiter.process(out, frames, m_channels);
+    }
     float masterPeak = 0.0f;
     for (int i = 0; i < frames * m_channels; ++i) {
         // Never wrap around: clamp what the limiter (if off) let through.

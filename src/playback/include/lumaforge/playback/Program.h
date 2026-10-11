@@ -69,6 +69,7 @@ public:
     // Final mix stage.
     [[nodiscard]] virtual float masterGain() const { return 1.0f; }
     [[nodiscard]] virtual bool masterLimiter() const { return false; }
+    [[nodiscard]] virtual float masterCeilingDb() const { return -0.3f; }   // limiter ceiling, dBFS
 };
 
 }  // namespace lf::playback

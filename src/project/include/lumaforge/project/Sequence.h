@@ -209,6 +209,7 @@ struct Sequence {
     std::vector<Marker> markers;   // sorted by time
     float masterVolume = 1.0f;     // linear gain of the final mix
     bool masterLimiter = true;     // keep the final mix below 0 dBFS without hard clipping
+    float masterCeilingDb = -0.3f; // limiter ceiling (dBFS); e.g. -1 for streaming/social delivery headroom
 
     [[nodiscard]] bool hasInOut() const noexcept { return markIn.ticks >= 0 && markOut.ticks > markIn.ticks; }
 

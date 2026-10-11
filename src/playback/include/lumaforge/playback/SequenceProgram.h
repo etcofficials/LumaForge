@@ -28,6 +28,7 @@ public:
     [[nodiscard]] std::vector<std::string> mediaPaths() const override;
     [[nodiscard]] float masterGain() const override { return m_masterGain; }
     [[nodiscard]] bool masterLimiter() const override { return m_limiter; }
+    [[nodiscard]] float masterCeilingDb() const override { return m_ceilingDb; }
 
     // Gain including fades and mute for a clip at sequence time t.
     static float gainAt(const project::Clip& clip, TimePoint t) noexcept;
@@ -63,6 +64,7 @@ private:
     bool m_hasAudio = false;
     float m_masterGain = 1.0f;
     bool m_limiter = true;
+    float m_ceilingDb = -0.3f;
 };
 
 }  // namespace lf::playback

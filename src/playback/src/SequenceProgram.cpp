@@ -68,6 +68,7 @@ SequenceProgram::SequenceProgram(const Project& project, const std::map<MediaId,
     m_hasAudio = !m_audioClips.empty();
     m_masterGain = seq.masterVolume;
     m_limiter = seq.masterLimiter;
+    m_ceilingDb = seq.masterCeilingDb;
 
     for (const auto& track : m_videoTracks) for (const auto& e : track) if (!e.path.empty()) m_paths.push_back(e.path);
     for (const auto& a : m_audioClips) m_paths.push_back(a.path);

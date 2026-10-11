@@ -320,7 +320,8 @@ std::string toJson(const Project& project, const std::string& projectDir) {
     }
     root["sequence"] = {{"tracks", std::move(tracks)}, {"clips", std::move(clips)},
                         {"markIn", project.sequence.markIn.ticks}, {"markOut", project.sequence.markOut.ticks}, {"markers", std::move(markers)},
-                        {"masterVolume", project.sequence.masterVolume}, {"masterLimiter", project.sequence.masterLimiter}};
+                        {"masterVolume", project.sequence.masterVolume}, {"masterLimiter", project.sequence.masterLimiter},
+                        {"masterCeiling", project.sequence.masterCeilingDb}};
     return root.dump(2);
 }
 
@@ -460,6 +461,8 @@ Result<LoadResult> fromJson(const std::string& text, const std::string& projectD
         }
         get(*seq, "masterVolume", p.sequence.masterVolume);
         get(*seq, "masterLimiter", p.sequence.masterLimiter);
+        get(*seq, "masterCeiling", p.sequence.masterCeilingDb);   // absent in older files: -0.3 dBFS
+        p.sequence.masterCeilingDb = std::clamp(p.sequence.masterCeilingDb, -12.0f, 0.0f);
         getTicks(*seq, "markIn", p.sequence.markIn);
         getTicks(*seq, "markOut", p.sequence.markOut);
         if (!p.sequence.hasInOut() && (p.sequence.markIn.ticks >= 0 || p.sequence.markOut.ticks >= 0)) {

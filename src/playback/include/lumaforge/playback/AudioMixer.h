@@ -72,6 +72,7 @@ private:
     std::vector<AudioClipRequest> m_requests;
     std::unordered_map<std::uint64_t, std::vector<float>> m_trackMix;   // per-track bus for the current block
     dsp::Limiter m_limiter;
+    float m_limiterCeilingDb = -0.3f;
     std::mutex m_levelMutex;
     std::unordered_map<std::uint64_t, float> m_trackPeaks;
     float m_masterPeak = 0.0f;
